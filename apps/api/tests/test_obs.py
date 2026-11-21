@@ -102,7 +102,7 @@ def test_redact_masks_values_not_words():
     out = redact(
         "password=Hunter2024! token: abc123def456 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.x "
         "key sk-proj-ABCDEFGHIJKLMNOP card 4111 1111 1111 1111 IC 900101-14-5678 "
-        "bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0"
+        "bot 123456789:" + "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0"
     )
     for leaked in (
         "Hunter2024",

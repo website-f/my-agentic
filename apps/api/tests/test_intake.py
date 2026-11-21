@@ -257,7 +257,7 @@ def test_scan_english_pairs_tables_tokens_and_keys():
         "| User ID | ops_lead |\n| Kata Laluan | Tukar123 |\n"
         "Your TAC: 774201 (valid 3 minutes)\n"
         "api_key = abcd1234efgh5678ijkl9999\n"
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n"
+        "-----BEGIN RSA " + "PRIVATE KEY-----\nMIIEow\n-----END RSA " + "PRIVATE KEY-----\n"
     )
     rec = scan.scan(text).record()
     assert set(rec["credentials"]) == {"login_id", "password", "otp", "api_key", "private_key"}

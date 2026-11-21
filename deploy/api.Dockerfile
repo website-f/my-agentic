@@ -22,7 +22,7 @@ os.makedirs(out, exist_ok=True)
 def get(url, sha):
     data = urllib.request.urlopen(url, timeout=300).read()
     got = hashlib.sha256(data).hexdigest()
-    if got != sha:
+    if got not in sha.split():  # one or more accepted checksums
         raise SystemExit(f"sha256 mismatch for {url}: {got}")
     return data
 seg = get(f"{base}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
@@ -36,7 +36,9 @@ if hashlib.sha256(open(f"{out}/pyannote-segmentation-3.0.onnx", "rb").read()).he
         "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079":
     raise SystemExit("segmentation model checksum mismatch")
 emb = get(f"{base}/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
-          "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2")
+          # the original upload, and the one upstream re-uploaded to the same release (Nov 2026)
+          "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2 "
+          "53cab20ba8f2eb2f6e2d89ecc18e88ef3222169b61b4419cbc13666744a4574b")
 open(f"{out}/3dspeaker_campplus_sv_zh_en_16k-common_advanced.onnx", "wb").write(emb)
 PY
 RUN chmod -R a+rX /opt/models

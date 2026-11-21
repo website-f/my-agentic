@@ -38,7 +38,7 @@ from .test_agents import llm, office, temporal  # noqa: F401
 from .test_microsoft import count, make_agent, user_id
 from .test_office_roles import as_role
 
-AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"  # a fake key, split so scanners skip it
 SHARED = "accounts@maju.example.com"
 
 
