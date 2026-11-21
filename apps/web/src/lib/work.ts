@@ -1,0 +1,343 @@
+/** Types and queries for agents, SOPs, tasks, approvals and broadcasts (P2). */
+import { queryOptions } from "@tanstack/react-query";
+
+import { msg } from "@/i18n";
+
+import { api } from "./api";
+
+export type ToolMode = "allow" | "ask" | "deny";
+export type TaskStatus = "triage" | "ready" | "running" | "blocked" | "review" | "done" | "failed" | "cancelled";
+export type Priority = "low" | "normal" | "high" | "urgent";
+
+export interface Template {
+  id: string;
+  role: string;
+  department: string;
+  model_group: string;
+  soul: string;
+  tools: Record<string, ToolMode>;
+  role_kind: string;
+  color: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  label: string;
+  description: string;
+  risk: "low" | "medium" | "high";
+  default_mode: ToolMode;
+  /** Unset on an agent: uses the agent's setting for this tool instead. */
+  follows?: string | null;
+}
+
+export interface Agent {
+  id: string;
+  slug: string;
+  name: string;
+  role: string;
+  template: string | null;
+  branch_id: string;
+  branch_name: string;
+  department_id: string | null;
+  department_name: string | null;
+  soul: string;
+  model_group: string;
+  tools: Record<string, ToolMode>;
+  autonomy: "ask" | "auto";
+  sop_ids: string[];
+  color: string;
+  reports_to: string | null;
+  status: "active" | "paused" | "retired";
+  role_kind: "leaf" | "orchestrator";
+  max_parallel_children: number;
+  max_spawn_depth: number;
+  budget_daily_tokens: number | null;
+  budget_monthly_usd: number | null;
+  heartbeat: boolean;
+  current_task: { id: string; title: string; status: TaskStatus } | null;
+  open_tasks: number;
+  created_at: string;
+  owner_user_id?: string | null;
+  owner_name?: string | null;
+  clone_of?: string | null;
+  can_manage?: boolean;
+  /** The viewer only watches this agent (a colleague's agent in their branch): no chat, tasks or edits. */
+  view_only: boolean;
+  /** A personal assistant: only ever returned to its owner. */
+  private: boolean;
+  /** A staff member's AI twin (P18); owner_name is the person it is the twin of. */
+  is_twin?: boolean;
+  /** P19: when it works (null = any time), a one-line summary, and whether it is on duty now. */
+  work_hours?: import("./hours").WorkHours | null;
+  hours_label?: string | null;
+  duty?: import("./hours").Duty | null;
+}
+
+export interface SOP {
+  id: string;
+  scope: "workspace" | "branch" | "department" | "library";
+  scope_id: string | null;
+  scope_label: string;
+  title: string;
+  body: string;
+  version: number;
+  updated_by: string | null;
+  updated_at: string;
+  /** P24: "draft" = written by AI from documents, waiting for a person; agents never see it. */
+  status?: "active" | "draft";
+  source_file_ids?: string[];
+  source_files?: { id: string; name: string }[];
+}
+
+/** P26: who else may look at a task (read only), chosen by managers and owners. */
+export type Visibility = "private" | "department" | "company" | "everyone";
+
+export const VISIBILITY: { value: Visibility; label: string; hint: string }[] = [
+  { value: "private", label: msg("Only the people involved"), hint: msg("You, its agent's owner and their managers.") },
+  { value: "department", label: msg("Its department"), hint: msg("Everyone in the department of the agent doing it.") },
+  { value: "company", label: msg("The whole company"), hint: msg("Everyone in this task's company.") },
+  { value: "everyone", label: msg("Everyone"), hint: msg("Every person in the workspace.") },
+];
+
+/** May choose who else sees a task. */
+export const canShareTasks = (perms: string[]) => ["agents.manage", "team.manage", "org.manage"].some((p) => perms.includes(p));
+
+export interface Task {
+  id: string;
+  title: string;
+  visibility?: Visibility;
+  brief: string;
+  status: TaskStatus;
+  priority: Priority;
+  assignee_agent_id: string | null;
+  assignee_name: string | null;
+  assignee_color: string | null;
+  source: string;
+  requires_review: boolean;
+  result: string | null;
+  error: string | null;
+  blocked_reason: string | null;
+  run_count: number;
+  steps_used: number;
+  pending_approvals: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  parent_task_id: string | null;
+  depth: number;
+  schedule_id: string | null;
+  has_output_schema: boolean;
+  labels?: string[];
+  branch_id?: string | null;
+  /** Board order within a column (lower first); older APIs leave it out. */
+  position?: number;
+  goal?: string | null;
+  goal_tries?: number;
+  /** Lists cut brief and result short; the detail (taskQuery) always has the full text. */
+  truncated?: boolean;
+  /** P21: the objective it serves (lists carry its title) and the first task of its request. */
+  objective_id?: string | null;
+  objective_title?: string | null;
+  root_task_id?: string | null;
+  /** P97: a task for a person (a member) instead of an agent, their name, who gave it, when it is due. */
+  assignee_user_id?: string | null;
+  assignee_user_name?: string | null;
+  created_by_name?: string | null;
+  due_at?: string | null;
+  /** P109: a task for people: when it starts, its kind of work, everyone it is for (first
+   * assignee first) and who follows it, and the card's counts. */
+  start_at?: string | null;
+  category?: string | null;
+  assignees?: PersonRef[];
+  watchers?: PersonRef[];
+  checklist_done?: number;
+  checklist_total?: number;
+  subtasks_done?: number;
+  subtasks_total?: number;
+  files_count?: number;
+  /** P114: whose request an agent task is (their daily AI allowance pays), and whose AI does it
+   * (staff rename their AI as they like, so its name alone may not say). */
+  for_user_id?: string | null;
+  for_user_name?: string | null;
+  assignee_owner_id?: string | null;
+  assignee_owner_name?: string | null;
+}
+
+/** P109: a person on a task (an assignee or a watcher). */
+export interface PersonRef {
+  user_id: string;
+  name: string;
+}
+
+/** P109: one tick of a task's checklist. */
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+  position: number;
+  done_by_name: string | null;
+  done_at: string | null;
+}
+
+/** POST /api/tasks/retry-failed */
+export interface RetryFailedResult {
+  retried: number;
+  retried_ids: string[];
+  skipped: { id: string; reason: string }[];
+}
+
+export interface TaskEvent {
+  id: number;
+  ts: string;
+  kind: string;
+  actor: string;
+  actor_name: string | null;
+  text: string;
+  data: Record<string, unknown> | null;
+}
+
+/** P102: what a waiting approval wants to do, in words: the server's tool label, else the
+ * code name made readable ("outlook_draft_reply" -> "Outlook draft reply"), never raw. */
+export const toolText = (a: { tool_name: string; tool_label?: string | null }): string =>
+  a.tool_label || a.tool_name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+export interface Approval {
+  id: string;
+  kind: "tool" | "question" | "budget";
+  tool_name: string;
+  tool_label: string;
+  args: Record<string, unknown>;
+  reason: string;
+  risk: "low" | "medium" | "high";
+  rule: string;
+  status: "pending" | "approved" | "denied" | "answered" | "expired" | "cancelled";
+  scope: "once" | "always" | null;
+  answer: string | null;
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  created_at: string;
+  expires_at: string;
+  task_id: string;
+  task_title: string;
+  agent_id: string;
+  agent_name: string;
+  agent_color: string;
+}
+
+export interface TranscriptItem {
+  id: number;
+  role: "user" | "assistant" | "tool";
+  content: string | null;
+  name: string | null;
+  tool_calls: string[];
+  created_at: string;
+  meta: { provider?: string; model?: string } | null;
+}
+
+export interface TaskDetail {
+  task: Task;
+  /** P26: shown because it was shared with you: look only. */
+  read_only?: boolean;
+  events: TaskEvent[];
+  approvals: Approval[];
+  transcript: TranscriptItem[];
+  children: Task[];
+  parent: Task | null;
+  meetings: { id: string; topic: string; status: string; outcome: { decision: string } | null }[];
+  /** P21: the objective it serves, and what its whole request cost so far. */
+  objective?: import("./objectives").TaskObjective | null;
+  request?: import("./objectives").RequestCost | null;
+  /** P109: the checklist, in order. */
+  checklist?: ChecklistItem[];
+}
+
+export interface Audience {
+  all: boolean;
+  branch_ids: string[];
+  department_ids: string[];
+  agent_ids: string[];
+}
+
+export interface Receipt {
+  agent_id: string;
+  agent_name: string;
+  agent_role: string;
+  agent_color: string;
+  department_name: string | null;
+  branch_name: string;
+  delivered_at: string;
+  ack_at: string | null;
+  reply: string | null;
+  task_id: string | null;
+}
+
+export interface Broadcast {
+  id: string;
+  sender: string;
+  sender_name: string | null;
+  audience: Audience;
+  audience_label: string;
+  mode: "announcement" | "directive";
+  request_reply: boolean;
+  body: string;
+  created_at: string;
+  targets: number;
+  acked: number;
+  receipts: Receipt[] | null;
+}
+
+export const workKeys = {
+  agents: ["agents"] as const,
+  agent: (id: string) => ["agents", id] as const,
+  templates: ["agents", "templates"] as const,
+  tools: ["agents", "tools"] as const,
+  sops: ["sops"] as const,
+  tasks: ["tasks"] as const,
+  task: (id: string) => ["tasks", id] as const,
+  approvals: (state: "pending" | "history") => ["approvals", state] as const,
+  broadcasts: ["broadcasts"] as const,
+  broadcast: (id: string) => ["broadcasts", id] as const,
+  sessions: (agentId: string) => ["chat", agentId, "sessions"] as const,
+  messages: (sessionId: string) => ["chat", "messages", sessionId] as const,
+};
+
+export const agentsQuery = queryOptions({ queryKey: workKeys.agents, queryFn: () => api<Agent[]>("/api/agents") });
+export const agentQuery = (id: string) =>
+  queryOptions({ queryKey: workKeys.agent(id), queryFn: () => api<Agent>(`/api/agents/${id}`) });
+export const templatesQuery = queryOptions({
+  queryKey: workKeys.templates,
+  queryFn: () => api<Template[]>("/api/agents/templates"),
+  staleTime: Infinity,
+});
+export const toolsQuery = queryOptions({
+  queryKey: workKeys.tools,
+  queryFn: () => api<ToolInfo[]>("/api/agents/tools"),
+  staleTime: Infinity,
+});
+export const sopsQuery = queryOptions({ queryKey: workKeys.sops, queryFn: () => api<SOP[]>("/api/sops") });
+export const tasksQuery = queryOptions({ queryKey: workKeys.tasks, queryFn: () => api<Task[]>("/api/tasks?limit=500") });
+export const taskQuery = (id: string) =>
+  queryOptions({ queryKey: workKeys.task(id), queryFn: () => api<TaskDetail>(`/api/tasks/${id}`) });
+export const approvalsQuery = (state: "pending" | "history" = "pending") =>
+  queryOptions({ queryKey: workKeys.approvals(state), queryFn: () => api<Approval[]>(`/api/approvals?state=${state}`) });
+
+export const STATUS_INFO: Record<TaskStatus, { label: string; tone: "neutral" | "accent" | "ok" | "warn" | "danger" | "info" }> = {
+  triage: { label: msg("Triage"), tone: "neutral" },
+  ready: { label: msg("Ready"), tone: "info" },
+  running: { label: msg("Running"), tone: "accent" },
+  blocked: { label: msg("Waiting"), tone: "warn" },
+  review: { label: msg("In review"), tone: "info" },
+  done: { label: msg("Done"), tone: "ok" },
+  failed: { label: msg("Failed"), tone: "danger" },
+  cancelled: { label: msg("Cancelled"), tone: "neutral" },
+};
+
+export const PRIORITY_INFO: Record<Priority, { label: string; tone: "neutral" | "info" | "warn" | "danger" }> = {
+  low: { label: msg("Low"), tone: "neutral" },
+  normal: { label: msg("Normal"), tone: "neutral" },
+  high: { label: msg("High"), tone: "warn" },
+  urgent: { label: msg("Urgent"), tone: "danger" },
+};

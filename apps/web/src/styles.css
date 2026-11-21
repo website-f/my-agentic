@@ -1,0 +1,224 @@
+@import "tailwindcss";
+/* P116: the sidebar with names (folded to icons otherwise): data-nav="wide" on the sidebar. */
+@custom-variant wide (&:where([data-nav="wide"], [data-nav="wide"] *));
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@import "./theme.css";
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Our own scrollbars everywhere, in the theme — never the default OS ones.
+     Thin, quiet, and darker on hover; they fade into the surface until used. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--border) 85%, var(--text)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--border) 80%, var(--text));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--accent) 55%, var(--text-muted));
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* Tailwind v4 positions with the `translate` property, so these only touch `transform`
+   and compose with centering instead of fighting it. */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sheet-in {
+  from { opacity: 0.6; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes nav-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* In a layer, so utility classes on a Markdown block can still override these. */
+@layer components {
+  /* Markdown output (agent answers, SOPs). Quiet, readable, theme-aware. */
+  .md > * + * { margin-top: 0.6em; }
+  .md h1, .md h2, .md h3 { font-weight: 600; line-height: 1.3; margin-top: 1em; }
+  .md h1 { font-size: 1.25em; }
+  .md h2 { font-size: 1.12em; }
+  .md h3 { font-size: 1em; }
+  .md ul { list-style: disc; padding-left: 1.3em; }
+  .md ol { list-style: decimal; padding-left: 1.3em; }
+  .md li + li { margin-top: 0.2em; }
+  .md code { font-family: var(--font-mono); font-size: 0.9em; background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 4px; }
+  .md pre { background: var(--surface-2); padding: 0.75em 1em; border-radius: var(--radius-sm); overflow-x: auto; }
+  .md pre code { background: none; padding: 0; }
+  .md blockquote { border-left: 3px solid var(--border); padding-left: 0.9em; color: var(--text-muted); }
+  .md table { width: 100%; border-collapse: collapse; font-size: 0.92em; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--border); padding: 0.35em 0.6em; text-align: left; }
+  .md th { background: var(--surface-2); font-weight: 500; }
+  .md hr { border: 0; border-top: 1px solid var(--border); }
+
+  /* Document preview: a white page in both themes, so it looks like what will print. */
+  .paper .md { color: #191919; }
+  .paper .md th, .paper .md td { border-color: #dcdcdc; }
+  .paper .md th { background: #f1f4f2; color: #191919; }
+  .paper .md blockquote { border-left-color: #d0d0d0; color: #555; }
+  .paper .md hr { border-top-color: #dcdcdc; }
+  /* A table on paper fills the page; one wider than the page scrolls sideways inside it at any
+     width instead of spilling out or crushing its columns. Long words wrap in their cell. */
+  .paper .md table { display: block; width: max-content; min-width: 100%; max-width: 100%; overflow-x: auto; }
+  .paper .md td, .paper .md th { min-width: 4.5rem; overflow-wrap: anywhere; }
+  @media (max-width: 639px) {
+    .paper .md td:nth-child(2), .paper .md th:nth-child(2) { min-width: 11rem; }
+  }
+  /* A gap the document still needs: [[Client name]] renders as an amber chip. */
+  .paper .md code { background: #fff1c2; color: #7a4f00; font-family: inherit; font-size: 0.92em; padding: 0.05em 0.4em; border-radius: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- native feel on phones
+   Unlayered on purpose: it must beat the utility classes (text-[13px] on a field). */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* Installed app: no rubber-band bounce or pull-to-refresh on the page itself (lists inside
+   still scroll; they already contain their own overscroll). */
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+}
+@media (pointer: coarse) {
+  /* iOS Safari zooms the whole page into any field under 16px when it gets focus. */
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select,
+  textarea,
+  [contenteditable="true"] {
+    font-size: 16px;
+  }
+  /* No grey flash on tap, no double-tap wait, no text selection or callout on controls. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  a,
+  button,
+  label,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"] {
+    touch-action: manipulation;
+  }
+  button,
+  [role="button"],
+  [role="tab"],
+  nav a {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+@media (pointer: coarse) and (max-width: 767px) {
+  /* Like a native app: the tab bar (and cards floating above it) step aside while the keyboard is up. */
+  body:has(:is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select, [contenteditable="true"]):focus)
+    :is(nav[aria-label="Main"].fixed, [data-keyboard-hide]) {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  /* Small controls get a finger-sized hit area without changing how they look. */
+  [role="switch"] {
+    position: relative;
+  }
+  [role="switch"]::after {
+    content: "";
+    position: absolute;
+    inset: -10px -6px;
+  }
+}
+
+/* ---------------------------------------------------------------- P96: app-ready on phones
+   In a layer, so a control's own utilities (absolute, fixed) still win over `relative`. */
+@layer components {
+  @media (pointer: coarse) {
+    /* A finger needs about 44 px. Small controls (the kit's `hit`, and bare icon buttons sized
+       5 to 9) get an invisible touch area that size without changing how they look. Controls
+       that draw their own ::after (tab underlines) keep it. */
+    :is(.hit, :is(button, a[href], [role="button"], [role="tab"], summary):is([class~="size-5"], [class~="size-6"], [class~="size-7"], [class~="size-8"], [class~="size-9"], [class~="h-6"], [class~="h-7"], [class~="h-8"], [class~="h-9"])):not([class*="after:"], [role="switch"]) {
+      position: relative;
+    }
+    :is(.hit, :is(button, a[href], [role="button"], [role="tab"], summary):is([class~="size-5"], [class~="size-6"], [class~="size-7"], [class~="size-8"], [class~="size-9"], [class~="h-6"], [class~="h-7"], [class~="h-8"], [class~="h-9"])):not([class*="after:"], [role="switch"])::after {
+      content: "";
+      position: absolute;
+      inset: min(0px, calc((100% - 44px) / 2));
+    }
+  }
+}
+@media (pointer: coarse) {
+  /* Menu, list-box and palette rows: a finger-high row each. */
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"],
+  [role="option"] {
+    min-height: 44px;
+  }
+}
+/* Wrapped as a phone app (Capacitor sets html.native-app, see lib/native.ts): no rubber-band
+   bounce or pull-to-refresh on the page itself, like the installed web app. */
+html.native-app,
+html.native-app body {
+  overscroll-behavior-y: none;
+}

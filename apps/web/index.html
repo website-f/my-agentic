@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- P96: viewport-fit=cover lets the app draw under a notch (the shell pads by env(safe-area-inset-*));
+         interactive-widget=resizes-content makes the on-screen keyboard shrink the page (and 100dvh), so a
+         bottom sheet or a form's Save button stays above the keyboard instead of under it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#f6f8f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d1210" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Your own AI office: mail, WhatsApp, tasks, approvals and your AI team." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Opened from the home screen: full screen, like an app (iOS reads these). -->
+    <meta name="application-name" content="My Agentic" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="My Agentic" />
+    <!-- "default": the installed web app keeps the status bar its own. The shell and sign-in pages
+         also pad by env(safe-area-inset-top) (P96), so a wrapped app that draws under it works too. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>My Agentic</title>
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

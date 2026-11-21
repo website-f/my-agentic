@@ -1,0 +1,954 @@
+"""Model-group routing with fallback (ported from CrawlOps services/gateway.py, extended).
+
+Agents name a group ("smart", "fast", ...), never a provider. The gateway walks the
+group's members in order and skips providers that are disabled, keyless or cooling
+down. On 401/402/5xx/timeouts it cools the provider and moves on; a failure that belongs to
+one model (403 "not allowed", a per-model 429) cools only that model (P29); a model the
+provider no longer has is marked stale and skipped. Every attempt is logged to llm_calls.
+
+P105: members marked "shared" take turns at the top of the list (rotation.py: weighted by
+recent speed and failures, sticky per agent or task for the prompt cache). A request too big
+for one model skips it without cooling it for anyone; a person's chat leaves a model that has
+not answered in settings.ai_answer_timeout when another one could answer.
+"""
+
+import asyncio
+import contextlib
+import hashlib
+import json
+import random
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..core.config import settings
+from ..core.db import release_idle
+from ..models import AIModel, AIProvider, ModelGroup
+from ..obs import langfuse
+from . import client, compliance, media, privacy, rotation, store
+from .client import Usage
+from .errors import Failure
+
+MAX_WAIT = 60.0  # seconds a call may wait for rate limits to reset
+
+# Background jobs that want a small JSON object, not an essay: thinking models are asked to
+# think briefly (reasoning_effort "low"), which keeps the JSON inside the token budget.
+BACKGROUND_TASKS = ("brain.", "skill.", "workflow.", "goal.", "overview.", "colleague.")
+
+
+class GatewayUnavailable(Exception):
+    """No member of the group could answer. `attempts` says why, member by member."""
+
+    def __init__(
+        self, message: str, attempts: list[dict[str, Any]], retry_in: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+        # P96: some member is only resting (a rate limit, a cooldown): usable again in about
+        # this many seconds, so the work can wait instead of failing.
+        self.retry_in = retry_in
+
+
+@dataclass
+class GatewayReply:
+    content: str
+    provider_id: str
+    provider_name: str
+    model: str
+    usage: Usage
+    latency_ms: int
+    cost_usd: float | None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    reasoning_content: str = ""
+    # P29: the reply stopped at the token limit (finish_reason "length"): not a whole answer.
+    truncated: bool = False
+
+
+def prefix_hash(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> str:
+    """sha256 (first 16 hex) of what a provider's prompt cache keys on: the leading system
+    message(s) and the tool schemas, in the order they are sent (P21). When it changes between
+    two calls of the same agent and job, the cached prefix cannot be reused and the whole
+    prompt is billed again; GET /api/ai/cache-health reports how often that happens."""
+    system = []
+    for m in messages:
+        if m.get("role") != "system":
+            break
+        system.append(m.get("content"))
+    raw = json.dumps({"system": system, "tools": tools or []}, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+# P29: failures that belong to one model, not the provider: cool that model only, so the
+# provider's other models keep answering.
+MODEL_SCOPED = frozenset({"forbidden", "rate_limited", "model_not_found"})
+
+# The only jobs the tiny local backup model may do when reached through another group.
+TINY_TASKS = frozenset({"colleague.memory", "file.understand", "browser.digest"})
+
+# P105: a person is waiting on these. A model that has not answered within
+# settings.ai_answer_timeout is left for the next one (when there is a next one), and resting
+# models are waited for at most settings.ai_chat_max_wait before the work fails over.
+INTERACTIVE_TASKS = frozenset({"agent.chat", "agent.api", "playground", "help.ask", "meeting.turn"})
+# P105: the local backup is not asked while a cloud member is free again within this many
+# seconds: the gateway waits for the cloud model instead.
+SHORT_REST = 20
+# P105: failures that say nothing about the model's health (this one request was too big).
+NOT_HEALTH = frozenset({"too_large"})
+
+
+@dataclass
+class _Guard:
+    """P33 for one gateway call: the company's data level and, when masking is on, the
+    detector. A cloud member gets masked messages; the masking of one call is done once and
+    reused by every cloud member it tries (placeholders are stable anyway)."""
+
+    level: str = "standard"
+    branch_id: str | None = None
+    detector: privacy.Detector | None = None
+    _masked: tuple[list[dict[str, Any]], privacy.Masker] | None = None
+
+    def masker(self) -> privacy.Masker | None:
+        return privacy.Masker(self.detector) if self.detector is not None else None
+
+    def masked(
+        self, p: AIProvider, messages: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], privacy.Masker | None]:
+        if self.detector is None or privacy.is_local(p):
+            return messages, None
+        if self._masked is None:
+            m = privacy.Masker(self.detector)
+            out = m.messages(messages)
+            if m.total:  # something was hidden: tell the model how placeholders work
+                out = privacy.with_legend(out)
+            self._masked = (out, m)
+        return self._masked
+
+    def check(self, members: list[dict[str, Any]], providers: dict[str, AIProvider]) -> None:
+        """Raise when the company's level leaves no member that could take the job."""
+        if self.level == "standard":
+            return
+        for m in members:
+            p = providers.get(m["provider_id"])
+            if p is not None and p.enabled and p.api_key_enc and privacy.allowed(p, self.level):
+                return
+        raise GatewayUnavailable(privacy.BLOCKED[self.level], [])
+
+
+async def _guard_for(
+    db: AsyncSession,
+    workspace_id: str,
+    branch_id: str | None,
+    agent_id: str | None,
+    task_id: str | None,
+) -> _Guard:
+    level, branch = await privacy.resolve_level(db, workspace_id, branch_id, agent_id, task_id)
+    return _Guard(
+        level=level, branch_id=branch, detector=await privacy.detector_for(db, workspace_id)
+    )
+
+
+async def _chat(
+    db: AsyncSession,
+    workspace_id: str,
+    group: str,
+    messages: list[dict[str, Any]],
+    *,
+    task: str,
+    max_tokens: int = 800,
+    temperature: float | None = 0.2,
+    json_mode: bool = False,
+    tools: list[dict[str, Any]] | None = None,
+    accept: Callable[[str], bool] | None = None,
+    agent_id: str | None = None,
+    task_id: str | None = None,
+    reasoning_effort: str | None = None,
+    branch_id: str | None = None,
+    _waited: float = 0.0,
+    _skip: frozenset[tuple[str, str]] = frozenset(),
+    _guard: _Guard | None = None,
+) -> GatewayReply:
+    """`reasoning_effort` asks thinking models that support it to think less (or more);
+    background JSON jobs (BACKGROUND_TASKS) get "low" without asking.
+
+    P33: `branch_id` (else the task's or the agent's company) sets the data level that
+    limits which members may be asked; a cloud member is sent masked messages and its reply
+    and tool calls come back with the real values. Callers only ever see real text."""
+    if reasoning_effort is None and json_mode and task.startswith(BACKGROUND_TASKS):
+        reasoning_effort = "low"
+    # Default groups are created lazily; a fresh workspace may not have them yet.
+    await store.ensure_default_groups(db, workspace_id)
+    g = await db.scalar(
+        select(ModelGroup).where(ModelGroup.workspace_id == workspace_id, ModelGroup.name == group)
+    )
+    if g is None:
+        raise GatewayUnavailable(f"There is no model group called '{group}'.", [])
+    if g.name in media.NAMES:
+        raise GatewayUnavailable(
+            f"The {g.label} group does not chat. Pick a chat group such as Smart or Fast.", []
+        )
+    if not g.members:
+        raise GatewayUnavailable(
+            f"The {g.label} group has no models yet. Add some in AI Engine > Model groups.", []
+        )
+
+    provider_ids = {m["provider_id"] for m in g.members}
+    providers = {
+        p.id: p
+        for p in (
+            await db.scalars(
+                select(AIProvider).where(
+                    AIProvider.id.in_(provider_ids), AIProvider.workspace_id == workspace_id
+                )
+            )
+        ).all()
+    }
+    guard = _guard or await _guard_for(db, workspace_id, branch_id, agent_id, task_id)
+    guard.check(g.members, providers)
+
+    prefix = prefix_hash(messages, tools)
+    attempts: list[dict[str, Any]] = []
+    waits: list[int] = []  # seconds until a cooling or rate-limited member is usable again
+    failed: set[tuple[str, str]] = set()  # failed for good: waiting will not change them
+    interactive = task in INTERACTIVE_TASKS
+    cap = min(MAX_WAIT, settings.ai_chat_max_wait) if interactive else MAX_WAIT
+    # P105: shared members take turns (sticky per agent or task), then the rest in order.
+    members = await rotation.order(g.id, g.members, agent_id, task_id)
+    for i, member in enumerate(members):
+        p = providers.get(member["provider_id"])
+        model_id = member["model_id"]
+        label = f"{p.name if p else 'removed provider'} / {model_id}"
+        if (member["provider_id"], model_id) in _skip:
+            attempts.append({"member": label, "skipped": "failed earlier in this call"})
+            continue
+        if p is None:
+            attempts.append({"member": label, "skipped": "provider was removed"})
+            continue
+        if not privacy.allowed(p, guard.level):
+            attempts.append({"member": label, "skipped": privacy.SKIPPED[guard.level]})
+            continue
+        if not p.enabled:
+            attempts.append({"member": label, "skipped": "provider is turned off"})
+            continue
+        if not privacy.is_local(p) and not await compliance.allowed(
+            db, workspace_id, f"ai:{p.id}", p.name, f"{task}: {model_id}"
+        ):
+            # P57: the approved-services lock is on and this provider is not approved.
+            attempts.append({"member": label, "skipped": "not an approved service"})
+            continue
+        key = store.provider_key(p)
+        if not key:
+            attempts.append({"member": label, "skipped": "no key saved"})
+            continue
+        if wait := await store.cooling_for(p.id):
+            attempts.append({"member": label, "skipped": f"cooling down for {wait} s"})
+            waits.append(wait)
+            continue
+        if wait := await store.model_cooling_for(p.id, model_id):
+            attempts.append({"member": label, "skipped": f"model cooling down for {wait} s"})
+            waits.append(wait)
+            continue
+        if p.name == store.LOCAL_PROVIDER and group != "local" and task not in TINY_TASKS:
+            # The tiny backup model never writes skills, facts or judgements (P17).
+            attempts.append({"member": label, "skipped": "too small for this job"})
+            continue
+        if (
+            p.name == store.LOCAL_PROVIDER
+            and group != "local"
+            and waits
+            and min(waits) <= SHORT_REST
+            and _waited + min(waits) <= cap
+        ):
+            # P105: a main model is only resting a few seconds: wait for it, not the backup.
+            attempts.append(
+                {"member": label, "skipped": f"a main model is free again in {min(waits)} s"}
+            )
+            continue
+        model_row = await store.model_row(db, p.id, model_id)
+        if model_row is not None and model_row.stale:
+            attempts.append({"member": label, "skipped": "model no longer offered"})
+            continue
+
+        known = await store.quirks(p.id, model_id) | client.local_quirks(p.tier, model_id)
+        thinker = "no_think" not in known and (
+            client.thinks(model_id) or await store.is_reasoning(p.id, model_id)
+        )
+        budget = max(max_tokens, client.reasoning_floor(json_mode)) if thinker else max_tokens
+        # P33: a cloud member sees placeholders, never the real values.
+        sent, masker = guard.masked(p, messages)
+        await release_idle(db)  # P96: inside a task step, no connection held while it thinks
+        # P105: a person is waiting and another model could answer: do not wait on a slow one.
+        deadline = (
+            settings.ai_answer_timeout
+            if interactive
+            and await _another(members[i + 1 :], providers, _skip | failed, guard, group, task)
+            else None
+        )
+        pending = client.chat(
+            p.base_url,
+            key,
+            model_id,
+            sent,
+            max_tokens=budget,
+            temperature=temperature,
+            json_mode=json_mode,
+            tools=tools,
+            quirks=known,
+            reasoning_effort=reasoning_effort
+            if thinker and client.takes_effort(model_id)
+            else None,
+            extra_body=privacy.zdr_body() if p.require_zdr else None,
+        )
+        if deadline is None:
+            r = await pending
+        else:
+            try:
+                r = await asyncio.wait_for(pending, deadline)
+            except TimeoutError:
+                r = client.ChatResult(
+                    call=client.CallResult(
+                        ok=False,
+                        latency_ms=int(deadline * 1000),
+                        failure=Failure(
+                            "slow",
+                            f"No answer within {deadline:g} s, so the next model was asked.",
+                        ),
+                    )
+                )
+        if masker is not None:
+            privacy.unmask_result(r, masker.mapping, json_mode=json_mode)
+        if r.quirks - known:
+            await store.remember_quirks(p.id, model_id, r.quirks - known)
+        if r.reasoning_retry:
+            await store.remember_reasoning(p.id, model_id)
+        # JSON cut off by the token limit cannot be parsed; another member may finish it.
+        truncated = r.call.ok and json_mode and r.finish_reason == "length" and not r.tool_calls
+        usable = (
+            r.call.ok
+            and not truncated
+            and (
+                bool(r.tool_calls)
+                or (bool(r.content.strip()) and (accept is None or accept(r.content)))
+            )
+        )
+        f = r.call.failure
+        cost = store.cost_usd(model_row, r.usage, p.tier) if r.call.ok else None
+        error_class = (
+            f.error_class
+            if f
+            else ("truncated" if truncated else (None if usable else "unusable_reply"))
+        )
+        await store.record_call(
+            workspace_id=workspace_id,
+            task=task,
+            group=group,
+            provider_id=p.id,
+            provider_name=p.name,
+            model=r.served_model or model_id,
+            usage=r.usage,
+            latency_ms=r.call.latency_ms,
+            ok=usable,
+            error_class=error_class,
+            error_detail=None if usable else (client.error_detail(r.call) or _bad_reply(r)),
+            cost=cost,
+            agent_id=agent_id,
+            task_id=task_id,
+            # What the provider caches on is what it was sent (masked for a cloud member).
+            prefix_hash=prefix if masker is None else prefix_hash(sent, tools),
+            masked=masker.total if masker is not None else 0,
+            branch_id=guard.branch_id,
+            data_level=guard.level,
+        )
+        if error_class not in NOT_HEALTH:
+            # P105: how this model answers, for the turns; a good answer keeps the agent here.
+            await rotation.note(
+                p.id,
+                model_id,
+                ok=usable,
+                latency_ms=r.call.latency_ms if usable or error_class == "slow" else None,
+                group_id=g.id if member.get("shared") else None,
+                agent_id=agent_id,
+                task_id=task_id,
+            )
+        langfuse.generation(
+            workspace_id=workspace_id,
+            kind=task,
+            group=group,
+            provider=p.name,
+            model=r.served_model or model_id,
+            messages=messages,
+            output=r.content,
+            tool_calls=r.tool_calls,
+            prompt_tokens=r.usage.prompt,
+            completion_tokens=r.usage.completion,
+            cost_usd=float(cost) if cost is not None else None,
+            latency_ms=r.call.latency_ms,
+            ok=usable,
+            error_class=error_class,
+            agent_id=agent_id,
+            task_id=task_id,
+            max_tokens=budget,
+            temperature=temperature,
+        )
+        if usable:
+            attempts.append({"member": label, "ok": True, "latency_ms": r.call.latency_ms})
+            return GatewayReply(
+                content=r.content,
+                provider_id=p.id,
+                provider_name=p.name,
+                model=r.served_model or model_id,
+                usage=r.usage,
+                latency_ms=r.call.latency_ms,
+                cost_usd=float(cost) if cost is not None else None,
+                tool_calls=r.tool_calls,
+                attempts=attempts,
+                reasoning_content=r.reasoning_content,
+                truncated=r.finish_reason == "length",
+            )
+        if f is not None:
+            if f.error_class == "model_not_found":
+                await _mark_stale(db, p, model_id)
+            if f.error_class in MODEL_SCOPED:
+                await store.cool_model(p.id, model_id, f.cool_seconds)
+            else:
+                await store.cool(p.id, f.cool_seconds)
+            if f.error_class == "rate_limited" and f.cool_seconds:
+                waits.append(f.cool_seconds)
+            else:
+                failed.add((p.id, model_id))
+            attempts.append({"member": label, "failed": f.message, "error_class": f.error_class})
+        else:
+            failed.add((p.id, model_id))
+            attempts.append(
+                {
+                    "member": label,
+                    "failed": "reply was cut off by the token limit"
+                    if truncated
+                    else "reply was empty or did not pass the check",
+                    "error_class": error_class,
+                }
+            )
+
+    # Some members only need a short wait (a per-minute rate limit, a brief cooldown): wait
+    # for them instead of failing the work, up to MAX_WAIT in total. Members that failed for
+    # good (a 400, a bad reply) used to stop this wait; now they are just not asked again.
+    if waits and _waited + min(waits) <= cap:
+        # P96: a little random spread (a tenth of the wait, 2 s at most), so 50 steps cooled
+        # by the same rate limit do not all ask again in the same instant.
+        spread = random.uniform(0, min(2.0, min(waits) / 10))  # noqa: S311 - not security
+        pause = min(waits) + 0.5 + spread
+        await asyncio.sleep(pause)
+        return await _chat(
+            db,
+            workspace_id,
+            group,
+            messages,
+            task=task,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=json_mode,
+            tools=tools,
+            accept=accept,
+            agent_id=agent_id,
+            task_id=task_id,
+            reasoning_effort=reasoning_effort,
+            branch_id=branch_id,
+            _waited=_waited + pause,
+            _skip=_skip | failed,
+            _guard=guard,
+        )
+    raise GatewayUnavailable(
+        f"No model in the {g.label} group could answer.",
+        attempts,
+        retry_in=int(min(waits)) + 1 if waits else None,
+    )
+
+
+async def _another(
+    later: list[dict[str, Any]],
+    providers: dict[str, AIProvider],
+    skip: frozenset[tuple[str, str]] | set[tuple[str, str]],
+    guard: _Guard,
+    group: str,
+    task: str,
+) -> bool:
+    """P105: some later member could take the work right now (on, keyed, allowed, not
+    resting), so a slow answer may be cut short. The last hope is always waited for."""
+    for m in later:
+        p = providers.get(m["provider_id"])
+        if (
+            p is None
+            or not p.enabled
+            or not p.api_key_enc
+            or (m["provider_id"], m["model_id"]) in skip
+            or not privacy.allowed(p, guard.level)
+            or (p.name == store.LOCAL_PROVIDER and group != "local" and task not in TINY_TASKS)
+        ):
+            continue
+        if await store.cooling_for(p.id) or await store.model_cooling_for(p.id, m["model_id"]):
+            continue
+        return True
+    return False
+
+
+def _bad_reply(r: client.ChatResult) -> str:
+    """A 200 that was still no use: say how it ended and how it began."""
+    head = client.redact(r.content)[:300]
+    return f"finish_reason={r.finish_reason}, {r.usage.completion} tokens: {head}"[:500]
+
+
+async def _mark_stale(db: AsyncSession, p: AIProvider, model_id: str) -> None:
+    row = await store.model_row(db, p.id, model_id)
+    if row is None:
+        row = AIModel(workspace_id=p.workspace_id, provider_id=p.id, model_id=model_id, caps={})
+        db.add(row)
+    row.stale = True
+    await db.commit()
+
+
+# The local model reads 4096 tokens; a longer prompt would be cut, instructions first.
+LOCAL_MAX_CHARS = 8000
+
+
+def cheap_groups(*texts: str) -> tuple[str, ...]:
+    """Side jobs: the fast cloud models first; the free local model only when none of them can
+    answer and the prompt fits it. P122 (speed): local-first made every reading wait on the
+    server's own processor: on the live server 750 of 772 local tries in three days ran out
+    the full 120 s (file reading, Help answers, Outlook reply drafts) before the cloud answered."""
+    return ("fast", "local") if sum(map(len, texts)) <= LOCAL_MAX_CHARS else ("fast",)
+
+
+# ---------------------------------------------------------------- the answer cache (P52)
+
+# Background jobs that often see the very same input again (the same email, file, fact or
+# skill test): an exact repeat is answered from the cache instead of a model. Never agent
+# work, chat or anything with tools; per workspace; a week at most.
+CACHED_TASKS = (
+    "brain.extract",
+    "brain.reconcile",
+    "skill.eval",
+    "file.understand",
+    "colleague.memory",
+    "vision.describe",
+    "document.review",
+)
+CACHE_TTL = 7 * 86400
+CACHE_MAX_CHARS = 60_000
+
+
+def _cache_key(
+    workspace_id: str, group: str, task: str, messages: list[dict[str, Any]], kw: dict[str, Any]
+) -> str | None:
+    temperature = kw.get("temperature", 0.2)
+    if (
+        not task.startswith(CACHED_TASKS)
+        or kw.get("tools")
+        or (temperature is not None and temperature > 0.3)
+        or any(k in kw for k in ("_waited", "_skip", "_guard"))
+    ):
+        return None
+    raw = json.dumps(
+        [group, task, kw.get("json_mode", False), kw.get("max_tokens", 800), messages],
+        sort_keys=True,
+        default=str,
+    )
+    if len(raw) > CACHE_MAX_CHARS * 4:
+        return None
+    return f"llmcache:{workspace_id}:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+
+async def chat(
+    db: AsyncSession,
+    workspace_id: str,
+    group: str,
+    messages: list[dict[str, Any]],
+    *,
+    task: str,
+    **kw: Any,
+) -> GatewayReply:
+    """The gateway (see _chat). P52: an exact repeat of a cached background job comes back
+    from the cache, free and instant."""
+    from ..core.valkey import valkey
+
+    key = _cache_key(workspace_id, group, task, messages, kw)
+    if key is not None:
+        try:
+            hit = await valkey().get(key)
+        except Exception:  # noqa: BLE001 - no cache: ask a model
+            hit = None
+        if hit:
+            data = json.loads(hit)
+            accept = kw.get("accept")
+            if accept is None or accept(data["content"]):
+                with contextlib.suppress(Exception):
+                    await valkey().incr(f"llmcache:hits:{workspace_id}")
+                return GatewayReply(
+                    content=data["content"],
+                    provider_id="",
+                    provider_name="cache",
+                    model=data.get("model", ""),
+                    usage=Usage(),
+                    latency_ms=0,
+                    cost_usd=0.0,
+                    attempts=[{"member": "cache", "ok": True}],
+                )
+    reply = await _chat(db, workspace_id, group, messages, task=task, **kw)
+    if (
+        key is not None
+        and reply.content
+        and not reply.tool_calls
+        and not reply.truncated
+        and len(reply.content) <= CACHE_MAX_CHARS
+    ):
+        with contextlib.suppress(Exception):  # no cache: the answer is still good
+            await valkey().set(
+                key, json.dumps({"content": reply.content, "model": reply.model}), ex=CACHE_TTL
+            )
+    return reply
+
+
+async def chat_first(
+    db: AsyncSession,
+    workspace_id: str,
+    groups: tuple[str, ...],
+    messages: list[dict[str, Any]],
+    **kw: Any,
+) -> GatewayReply:
+    """Try groups in order (e.g. ("local", "fast")): the free local model takes simple side
+    jobs, and the next group answers when it cannot (none set up, down, or a bad reply)."""
+    last: GatewayUnavailable | None = None
+    for group in dict.fromkeys(groups):
+        try:
+            return await chat(db, workspace_id, group, messages, **kw)
+        except GatewayUnavailable as e:
+            last = e
+    raise last or GatewayUnavailable("No group could answer.", [])
+
+
+# ---------------------------------------------------------------- voice and pictures (P18)
+
+
+class NotConfigured(GatewayUnavailable):
+    """The group has no models yet: a person has to add one in AI Engine."""
+
+
+class MediaRejected(ValueError):
+    """The audio or prompt itself cannot be used (empty, too big, too long)."""
+
+
+NO_TRANSCRIBE = (
+    "Voice notes need a speech-to-text model. Add one in AI Engine > Model groups > Speech "
+    "to text (Groq whisper-large-v3-turbo is free; OpenAI gpt-4o-mini-transcribe works too)."
+)
+NO_IMAGE = (
+    "No picture model is set up. Add one in AI Engine > Model groups > Image generation "
+    "(OpenAI gpt-image-1 or dall-e-3)."
+)
+
+
+@dataclass
+class _Try:
+    call: client.CallResult
+    usage: Usage
+    cost: Any  # Decimal | None
+    value: Any = None
+
+
+@dataclass
+class Transcript:
+    text: str
+    provider_name: str
+    model: str
+    seconds: float | None
+    language: str | None
+    latency_ms: int
+    cost_usd: float | None
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    segments: list[dict[str, Any]] = field(default_factory=list)  # whisper verbose_json only
+
+
+@dataclass
+class Picture:
+    data: bytes
+    mime: str
+    ext: str
+    size: str
+    provider_name: str
+    model: str
+    revised_prompt: str
+    latency_ms: int
+    cost_usd: float | None
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+
+
+async def _walk(
+    db: AsyncSession,
+    workspace_id: str,
+    group: str,
+    *,
+    task: str,
+    unconfigured: str,
+    attempt: Callable[[AIProvider, str, str, privacy.Masker | None], Awaitable[_Try]],
+    agent_id: str | None,
+    task_id: str | None,
+    branch_id: str | None = None,
+) -> tuple[_Try, AIProvider, str, list[dict[str, Any]]]:
+    """The routing of chat(), for one-shot media calls: members in order, skipping providers
+    that are off, keyless or cooling; a failure cools the provider and the next one is asked.
+    No waiting for rate limits: a person is usually waiting on the answer.
+
+    P33: the company's data level limits the members exactly as in chat() (audio and
+    pictures cannot be masked, so a Confidential company's go to trusted providers only and
+    a Local-only company's never leave). `attempt` gets a Masker for a cloud member (None for
+    a local one) to mask the text it sends and unmask what comes back."""
+    await store.ensure_default_groups(db, workspace_id)
+    g = await db.scalar(
+        select(ModelGroup).where(ModelGroup.workspace_id == workspace_id, ModelGroup.name == group)
+    )
+    if g is None or not g.members:
+        raise NotConfigured(unconfigured, [])
+    providers = {
+        p.id: p
+        for p in (
+            await db.scalars(
+                select(AIProvider).where(
+                    AIProvider.id.in_({m["provider_id"] for m in g.members}),
+                    AIProvider.workspace_id == workspace_id,
+                )
+            )
+        ).all()
+    }
+    guard = await _guard_for(db, workspace_id, branch_id, agent_id, task_id)
+    guard.check(g.members, providers)
+    attempts: list[dict[str, Any]] = []
+    last = ""
+    for member in g.members:
+        p = providers.get(member["provider_id"])
+        model_id = member["model_id"]
+        label = f"{p.name if p else 'removed provider'} / {model_id}"
+        if p is None:
+            attempts.append({"member": label, "skipped": "provider was removed"})
+            continue
+        if not privacy.allowed(p, guard.level):
+            attempts.append({"member": label, "skipped": privacy.SKIPPED[guard.level]})
+            continue
+        if not p.enabled:
+            attempts.append({"member": label, "skipped": "provider is turned off"})
+            continue
+        if not privacy.is_local(p) and not await compliance.allowed(
+            db, workspace_id, f"ai:{p.id}", p.name, f"{task}: {model_id}"
+        ):
+            # P57: the approved-services lock is on and this provider is not approved.
+            attempts.append({"member": label, "skipped": "not an approved service"})
+            continue
+        key = store.provider_key(p)
+        if not key:
+            attempts.append({"member": label, "skipped": "no key saved"})
+            continue
+        if wait := await store.cooling_for(p.id):
+            attempts.append({"member": label, "skipped": f"cooling down for {wait} s"})
+            continue
+        row = await store.model_row(db, p.id, model_id)
+        if row is not None and row.stale:
+            attempts.append({"member": label, "skipped": "model no longer offered"})
+            continue
+        masker = None if privacy.is_local(p) else guard.masker()
+        t = await attempt(p, key, model_id, masker)
+        f = t.call.failure
+        await store.record_call(
+            workspace_id=workspace_id,
+            task=task,
+            group=group,
+            provider_id=p.id,
+            provider_name=p.name,
+            model=model_id,
+            usage=t.usage,
+            latency_ms=t.call.latency_ms,
+            ok=t.call.ok,
+            error_class=f.error_class if f else None,
+            error_detail=None if t.call.ok else client.error_detail(t.call),
+            cost=t.cost if t.call.ok else None,
+            agent_id=agent_id,
+            task_id=task_id,
+            masked=masker.total if masker is not None else 0,
+            branch_id=guard.branch_id,
+            data_level=guard.level,
+        )
+        if t.call.ok:
+            attempts.append({"member": label, "ok": True, "latency_ms": t.call.latency_ms})
+            return t, p, model_id, attempts
+        if f is not None:
+            if f.error_class == "model_not_found":
+                await _mark_stale(db, p, model_id)
+            # Speech and pictures: one model per provider in practice, and the minutes
+            # pipeline reads the provider's rest to schedule its retry.
+            await store.cool(p.id, f.cool_seconds)
+            last = f.message
+        attempts.append(
+            {
+                "member": label,
+                "failed": f.message if f else "no usable answer",
+                "error_class": f.error_class if f else "unusable_reply",
+            }
+        )
+    if not last:
+        raise GatewayUnavailable(
+            f"No model in the {g.label} group is usable right now (off, keyless or resting).",
+            attempts,
+        )
+    raise GatewayUnavailable(f"No model in the {g.label} group could do it. {last}", attempts)
+
+
+async def transcribe(
+    db: AsyncSession,
+    workspace_id: str,
+    audio: bytes,
+    *,
+    mime: str,
+    language: str | None = None,
+    seconds: float | None = None,
+    task: str = "audio.transcribe",
+    agent_id: str | None = None,
+    task_id: str | None = None,
+    prompt: str | None = None,
+    branch_id: str | None = None,
+) -> Transcript:
+    """Speech to text through the "transcribe" group. `seconds` is the length when the
+    caller knows it (refused over 10 minutes; also priced by it when the provider is quiet).
+    Raises MediaRejected, NotConfigured or GatewayUnavailable."""
+    if not audio:
+        raise MediaRejected("The recording is empty.")
+    if len(audio) > client.MAX_AUDIO_BYTES:
+        raise MediaRejected(f"Voice recordings can be up to {media.MAX_AUDIO_MB} MB.")
+    if seconds is not None and seconds > media.MAX_AUDIO_SECONDS:
+        raise MediaRejected(
+            f"Voice recordings can be up to {media.MAX_AUDIO_SECONDS // 60} minutes long."
+        )
+    filename = media.audio_filename(mime)
+
+    async def attempt(
+        p: AIProvider, key: str, model_id: str, masker: privacy.Masker | None
+    ) -> _Try:
+        # The context prompt (earlier words, names) is text: a cloud model gets it masked.
+        r = await client.transcribe(
+            p.base_url,
+            key,
+            model_id,
+            audio,
+            filename,
+            media.bare_mime(mime),
+            language,
+            prompt=masker.text(prompt) if masker is not None and prompt else prompt,
+        )
+        if masker is not None and masker.mapping:
+            r.text = privacy.unmask(r.text, masker.mapping)
+            for s in r.segments:
+                s["text"] = privacy.unmask(s["text"], masker.mapping)
+        secs = r.seconds if r.seconds is not None else seconds
+        return _Try(r.call, r.usage, media.transcribe_cost(model_id, secs, p.tier), r)
+
+    t, p, model_id, attempts = await _walk(
+        db,
+        workspace_id,
+        media.TRANSCRIBE,
+        task=task,
+        unconfigured=NO_TRANSCRIBE,
+        attempt=attempt,
+        agent_id=agent_id,
+        task_id=task_id,
+        branch_id=branch_id,
+    )
+    r: client.TranscribeResult = t.value
+    return Transcript(
+        text=r.text,
+        provider_name=p.name,
+        model=model_id,
+        seconds=r.seconds if r.seconds is not None else seconds,
+        language=r.language,
+        latency_ms=r.call.latency_ms,
+        cost_usd=float(t.cost) if t.cost is not None else None,
+        attempts=attempts,
+        segments=r.segments,
+    )
+
+
+def picture_type(data: bytes) -> tuple[str, str]:
+    """(mime, extension) from the bytes themselves; empty when it is not a picture."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png", "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg", "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    return "", ""
+
+
+async def generate_image(
+    db: AsyncSession,
+    workspace_id: str,
+    prompt: str,
+    *,
+    shape: str = "square",
+    style: str | None = None,
+    task: str = "image.generate",
+    agent_id: str | None = None,
+    task_id: str | None = None,
+    branch_id: str | None = None,
+) -> Picture:
+    """One picture through the "image" group. Raises MediaRejected, NotConfigured or
+    GatewayUnavailable. A cloud model gets the prompt masked (P33)."""
+    prompt = prompt.strip()
+    if not prompt:
+        raise MediaRejected("Describe the picture to make.")
+    style = (style or "").strip()[:200] or None
+    full = prompt if not style or style in ("vivid", "natural") else f"{prompt}\n\nStyle: {style}"
+    full = full[:4000]
+
+    async def attempt(
+        p: AIProvider, key: str, model_id: str, masker: privacy.Masker | None
+    ) -> _Try:
+        size = media.image_size(model_id, shape)
+        r = await client.generate_image(
+            p.base_url,
+            key,
+            model_id,
+            masker.text(full) if masker is not None else full,
+            size=size,
+            quality=media.image_quality(model_id),
+            style=style,
+        )
+        if masker is not None and masker.mapping:
+            r.revised_prompt = privacy.unmask(r.revised_prompt, masker.mapping)
+        if r.call.ok and not picture_type(r.image)[0]:
+            r.call.ok = False
+            r.call.failure = Failure("bad_response", "The picture came back unreadable.")
+        return _Try(r.call, r.usage, media.image_cost(model_id, size, p.tier), (r, size))
+
+    t, p, model_id, attempts = await _walk(
+        db,
+        workspace_id,
+        media.IMAGE,
+        task=task,
+        unconfigured=NO_IMAGE,
+        attempt=attempt,
+        agent_id=agent_id,
+        task_id=task_id,
+        branch_id=branch_id,
+    )
+    r, size = t.value
+    mime, ext = picture_type(r.image)
+    return Picture(
+        data=r.image,
+        mime=mime,
+        ext=ext,
+        size=size,
+        provider_name=p.name,
+        model=model_id,
+        revised_prompt=r.revised_prompt,
+        latency_ms=r.call.latency_ms,
+        cost_usd=float(t.cost) if t.cost is not None else None,
+        attempts=attempts,
+    )

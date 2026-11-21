@@ -1,0 +1,174 @@
+"""Who may find what: the same rules as the pages that open each result.
+
+A person:
+- files: what the Files page shows them (documents.service.scoped: workspace roles all; a
+  branch manager their company; others what they or their agents made) plus the library
+  guidelines shared with them (knowledge.search.sees: company + department rules)
+- SOPs: active ones in their library scope; drafts only for people who manage SOPs
+  (org.manage), like the SOPs page
+- Document Studio documents: as on the Documents page (service.scoped); templates: the
+  whole workspace's and their company's
+- wiki pages: workspace roles all; office roles workspace-wide pages and their company's
+
+An agent: what read_file / find_sop / search_library let it read: its company's files and
+the workspace's (department guidelines only for its department; never a person's own files
+or another person's private assistant's work, documents.service.agent_files), active SOPs in
+its scope, its company's documents and templates. No wiki pages (it has recall for those).
+
+P29: nobody finds another person's private assistant's files or documents, admins included.
+
+Held-back (quarantined) files are never found by anyone, managers included: their text is
+for reading in the file viewer, not for search.
+"""
+
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import ColumnElement, and_, false, or_, select, true
+
+from ..core.security import can
+from ..documents import service
+from ..knowledge import dept_scope
+from ..knowledge import search as library
+from ..models import SOP, Agent, BrainPage, Department, DocFile, DocTemplate, Document
+
+
+@dataclass(frozen=True)
+class Viewer:
+    workspace_id: str
+    reader: library.Reader  # the library's scope (company + department)
+    key: str  # cache key for this person's vocabulary
+    principal: Any = None  # a person (None for an agent)
+    agent: Agent | None = None
+    drafts: bool = False  # sees draft SOPs
+    user_id: str | None = None
+
+    @property
+    def everything(self) -> bool:
+        return self.reader.everything
+
+    # ------------------------------------------------------------ per kind
+
+    def files(self) -> ColumnElement[bool]:
+        ws = DocFile.workspace_id == self.workspace_id
+        open_ = and_(ws, DocFile.quarantined.is_(False), DocFile.status == "ready")
+        if self.agent is not None:  # P29: read_file's rule (documents.service.agent_files)
+            return and_(open_, service.agent_files(self.agent))
+        if self.everything:  # P29: never another person's private assistant's work
+            hidden = service.not_private_work(DocFile, self.principal)
+            return and_(open_, hidden) if hidden is not None else open_
+        shared = and_(DocFile.library.is_(True), library_scope(self.reader))
+        narrow = dept_scope.person_files(self.principal)  # P109: own department only
+        if narrow is not None:
+            shared = and_(shared, narrow)
+        mine = service.scoped(select(DocFile.id).where(ws), DocFile, self.principal)
+        return and_(open_, or_(DocFile.id.in_(mine), shared))
+
+    def sops(self) -> ColumnElement[bool]:
+        ws = SOP.workspace_id == self.workspace_id
+        status = (
+            or_(SOP.status == "active", SOP.status == "draft")
+            if self.drafts
+            else (SOP.status == "active")
+        )
+        if self.everything:
+            return and_(ws, status)
+        r = self.reader
+        parts: list[ColumnElement[bool]] = [SOP.scope.in_(("workspace", "library"))]
+        if r.branch_id:
+            parts.append(and_(SOP.scope == "branch", SOP.scope_id.in_(r.branch_ids)))
+            depts = select(Department.id).where(Department.branch_id.in_(r.branch_ids))
+            if not r.all_departments:
+                depts = depts.where(
+                    Department.id == r.department_id if r.department_id else false()
+                )
+            parts.append(and_(SOP.scope == "department", SOP.scope_id.in_(depts)))
+        return and_(ws, status, or_(*parts))
+
+    def documents(self) -> ColumnElement[bool]:
+        ws = Document.workspace_id == self.workspace_id
+        if self.agent is not None:
+            return service.agent_documents(self.agent)
+        if self.everything:
+            hidden = service.not_private_work(Document, self.principal)
+            return and_(ws, hidden) if hidden is not None else ws
+        mine = service.scoped(select(Document.id).where(ws), Document, self.principal)
+        return and_(ws, Document.id.in_(mine))
+
+    def templates(self) -> ColumnElement[bool]:
+        ws = DocTemplate.workspace_id == self.workspace_id
+        if self.everything:
+            return ws
+        b = self.reader.branch_id
+        return and_(
+            ws,
+            or_(DocTemplate.branch_id.is_(None), DocTemplate.branch_id.in_(self.reader.branch_ids))
+            if b
+            else (DocTemplate.branch_id.is_(None)),
+        )
+
+    def pages(self) -> ColumnElement[bool]:
+        if self.agent is not None:
+            return false()
+        ws = and_(BrainPage.workspace_id == self.workspace_id, BrainPage.kind.in_(WIKI_KINDS))
+        if self.everything:
+            return ws
+        b = self.reader.branch_id
+        return and_(
+            ws,
+            or_(BrainPage.branch_id.is_(None), BrainPage.branch_id.in_(self.reader.branch_ids))
+            if b
+            else (BrainPage.branch_id.is_(None)),
+        )
+
+
+WIKI_KINDS = ("wiki", "decision")
+
+
+def library_scope(r: library.Reader) -> ColumnElement[bool]:
+    """knowledge.search.scope_where, on files."""
+    if r.everything:
+        return true()
+    branch = (
+        or_(DocFile.branch_id.is_(None), DocFile.branch_id.in_(r.branch_ids))
+        if r.branch_id
+        else DocFile.branch_id.is_(None)
+    )
+    if r.all_departments:
+        return branch
+    # P36: the department is a filing label; only a restricted file is kept to its
+    # department (and never shown to staff).
+    dept = (
+        or_(DocFile.restricted.is_(False), DocFile.department_id == r.department_id)
+        if r.department_id and not r.personal
+        else DocFile.restricted.is_(False)
+    )
+    return and_(branch, dept)
+
+
+def for_person(principal: Any) -> Viewer:
+    sc = principal.scope
+    key = (
+        f"{principal.workspace_id}:all"
+        if sc.everything
+        else f"{principal.workspace_id}:u:{principal.user.id}:{principal.role}"
+        f":{','.join(principal.scope.branch_ids) if principal.scope.branch_ids else '-'}"
+        f":{principal.department_id or '-'}"
+    )
+    return Viewer(
+        principal.workspace_id,
+        library.for_person(principal),
+        key,
+        principal=principal,
+        drafts=can(principal.role, "org.manage"),
+        user_id=principal.user.id,
+    )
+
+
+def for_agent(agent: Agent) -> Viewer:
+    return Viewer(
+        agent.workspace_id,
+        library.for_agent(agent),
+        f"{agent.workspace_id}:a:{agent.id}",
+        agent=agent,
+    )

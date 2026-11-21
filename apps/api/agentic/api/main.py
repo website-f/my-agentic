@@ -1,0 +1,502 @@
+"""FastAPI app: `uvicorn agentic.api.main:app`."""
+
+import asyncio
+import hmac
+import logging
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from .. import __version__
+from ..brain import embed
+from ..core.config import settings
+from ..core.db import engine
+from ..core.valkey import close_valkey
+from ..i18n import Msg, current_lang, normalize, render, reset_lang, set_lang, tr
+from .deps import (
+    APP_CLIENT_HEADER,
+    APP_SESSION_HEADER,
+    CSRF_COOKIE,
+    CSRF_HEADER,
+    LANG_HEADER,
+    SESSION_COOKIE,
+)
+from .routers import (
+    agents,
+    ai_engine,
+    assistants,
+    audit_log,
+    auth,
+    blueprints,
+    brain,
+    channels,
+    company_files,
+    documents,
+    events_stream,
+    files,
+    impact,
+    learning,
+    lessons,
+    library,
+    mcp_servers,
+    media,
+    monitor,
+    office,
+    openai_compat,
+    org,
+    packs,
+    prefs,
+    reports,
+    skills,
+    sops,
+    system,
+    tasks,
+    teams,
+    two_factor,
+    vault,
+    web_tasks,
+    whatsapp,
+    workflow_runs,
+    workflows,
+)
+
+log = logging.getLogger("agentic.api")
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# No session exists yet on these, so there is no CSRF cookie to compare against.
+CSRF_EXEMPT = {"/api/auth/login", "/api/auth/login/2fa", "/api/auth/setup", "/api/push/act"}
+# File uploads send raw bytes. A cross-site form cannot send octet-stream either, so the
+# JSON-only guarantee holds; the CSRF token is still checked.
+RAW_UPLOAD_PATHS = {"/api/files", "/api/transcribe"}
+# P35: uploads that may also come as a multipart form (a browser FormData). The CSRF token is
+# still checked on them (a cross-site form cannot set the header).
+MULTIPART_PATHS: set[str] = set()
+WEBHOOK_PREFIX = "/api/whatsapp/hook/"
+# P31: a PC posts file bytes here with its bearer token (never a session cookie).
+RAW_UPLOAD_PREFIXES: tuple[str, ...] = ("/api/devices/uploads/",)
+# P31: a PC authenticates with its link code or bearer token, not a session, so a stray
+# cookie never asks it for a CSRF token.
+DEVICE_PATHS = ("/api/devices/claim", "/api/devices/uploads/", "/api/devices/self/")
+# P34: Microsoft Graph's webhook. Its validation handshake is a text/plain POST, and Graph
+# never has a session; the clientState of each notification authenticates it.
+PUBLIC_HOOK_PATHS = {"/api/integrations/microsoft/notify"}
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Load the embedding model in the background so the first search is not slow.
+    warm = asyncio.create_task(embed.warm())
+    from ..devices import hub, tunnel  # P58: the egress proxy's way through a company computer
+
+    # P94: this process holds the PC sockets and has none yet: online flags left by the
+    # process before (a restart) are dropped, so no computer shows online until it is back.
+    await hub.at_startup()
+    await tunnel.start()
+    yield
+    await tunnel.stop()
+    warm.cancel()
+    await close_valkey()
+    await engine.dispose()
+
+
+app = FastAPI(
+    title="Agentic-AI",
+    version=__version__,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None,
+)
+
+
+@app.middleware("http")
+async def csrf_guard(request: Request, call_next):
+    """Two layers for state-changing API calls:
+    1. JSON only: a cross-site HTML form cannot send application/json without a CORS
+       preflight, and this API allows no cross-origin requests.
+    2. Double-submit token: the X-CSRF-Token header must match the agentic_csrf cookie.
+    """
+    path = request.url.path
+    if (
+        request.method in UNSAFE_METHODS
+        and path.startswith("/api/")
+        and path not in PUBLIC_HOOK_PATHS
+    ):
+        ctype = request.headers.get("content-type", "")
+        raw_ok = (
+            (path in RAW_UPLOAD_PATHS or path.startswith(RAW_UPLOAD_PREFIXES))
+            and request.method == "POST"
+            and ctype.startswith("application/octet-stream")
+        ) or (
+            path in MULTIPART_PATHS
+            and request.method == "POST"
+            and ctype.startswith("multipart/form-data")
+        )
+        if not ctype.startswith("application/json") and not raw_ok:
+            return _error(415, "json_required", tr("Send requests as application/json."))
+        # Signed webhooks (WhatsApp) never use the session cookie, so CSRF does not apply.
+        exempt = (
+            path in CSRF_EXEMPT or path.startswith(WEBHOOK_PREFIX) or path.startswith(DEVICE_PATHS)
+        )
+        if not exempt and request.cookies.get(SESSION_COOKIE):
+            cookie = request.cookies.get(CSRF_COOKIE, "")
+            header = request.headers.get(CSRF_HEADER, "")
+            if not cookie or not hmac.compare_digest(cookie, header):
+                return _error(403, "csrf_failed", tr("Reload the page and try again."))
+    return await call_next(request)
+
+
+class LanguageMiddleware:
+    """P22: the language this request is answered in. X-Lang (the app's language) wins;
+    without it, current_principal falls back to the person's saved preference; else English.
+    Kept in a contextvar (deep code calls i18n.current_lang()) and on request.state."""
+
+    def __init__(self, app_) -> None:
+        self.app = app_
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        raw = dict(scope.get("headers") or []).get(LANG_HEADER.encode(), b"")
+        lang = normalize(raw.decode("latin-1"))
+        scope.setdefault("state", {})["lang"] = lang
+        token = set_lang(lang)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_lang(token)
+
+
+def request_lang(request: Request) -> str:
+    return normalize(getattr(request.state, "lang", None)) or current_lang()
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/docs"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+def _error(status_code: int, code: str, message: str, fields: dict | None = None) -> JSONResponse:
+    body: dict = {"code": code, "message": message}
+    if fields:
+        body["fields"] = fields
+    return JSONResponse(status_code=status_code, content=body)
+
+
+@app.exception_handler(HTTPException)
+async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
+    detail: Any = exc.detail  # starlette types it as str; ours carries a dict
+    lang = request_lang(request)
+    if isinstance(detail, dict) and "code" in detail:
+        message = render(detail.get("message", ""), lang)
+        fields = detail.get("fields")  # P50: which inputs were wrong, each in the person's language
+        if isinstance(fields, dict):
+            fields = {
+                str(k): render(v if isinstance(v, str) else str(v), lang) for k, v in fields.items()
+            }
+        return _error(
+            exc.status_code,
+            str(detail["code"]),
+            message,
+            fields if isinstance(fields, dict) else None,
+        )
+    return _error(exc.status_code, "http_error", render(str(exc.detail), lang))
+
+
+# Pydantic's own messages, by error type; ctx values fill the {vars}.
+PYDANTIC_MESSAGES: dict[str, str] = {
+    "missing": "Field required",
+    "string_too_short": "Should have at least {min_length} characters",
+    "string_too_long": "Should have at most {max_length} characters",
+    "too_short": "Should have at least {min_length} items",
+    "too_long": "Should have at most {max_length} items",
+    "greater_than": "Should be greater than {gt}",
+    "greater_than_equal": "Should be {ge} or more",
+    "less_than": "Should be less than {lt}",
+    "less_than_equal": "Should be {le} or less",
+    "int_parsing": "Should be a whole number",
+    "int_type": "Should be a whole number",
+    "float_parsing": "Should be a number",
+    "float_type": "Should be a number",
+    "bool_parsing": "Should be true or false",
+    "bool_type": "Should be true or false",
+    "string_type": "Should be text",
+    "list_type": "Should be a list",
+    "dict_type": "Should be an object",
+    "enum": "Should be one of: {expected}",
+    "literal_error": "Should be one of: {expected}",
+    "extra_forbidden": "Not a known field",
+    "json_invalid": "Not valid JSON",
+    "url_parsing": "Not a valid web address",
+    "datetime_parsing": "Not a valid date and time",
+    "datetime_from_date_parsing": "Not a valid date and time",
+    "date_parsing": "Not a valid date",
+    "uuid_parsing": "Not a valid id",
+}
+
+
+def _field_message(err: dict[str, Any], lang: str) -> str:
+    """One field's problem in the request's language. Our validators raise ValueError with
+    a Msg (or plain English with a known template); pydantic's own go by error type."""
+    ctx = err.get("ctx") or {}
+    cause = ctx.get("error")
+    if isinstance(cause, BaseException) and cause.args and isinstance(cause.args[0], str):
+        return render(cause.args[0], lang)
+    template = PYDANTIC_MESSAGES.get(str(err.get("type", "")))
+    if template is not None and lang != "en":
+        values = {k: v for k, v in ctx.items() if isinstance(v, (str, int, float))}
+        return Msg(template, **values).render(lang)
+    msg = str(err.get("msg", "Invalid value")).removeprefix("Value error, ")
+    return render(msg, lang)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    lang = request_lang(request)
+    fields: dict[str, str] = {}
+    for err in exc.errors():
+        loc = [str(p) for p in err.get("loc", []) if p not in ("body", "query", "path")]
+        fields[".".join(loc) or "_"] = _field_message(err, lang)
+    return _error(422, "validation_failed", tr("Some fields need fixing.", lang), fields)
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+    log.exception("unhandled error", exc_info=exc)
+    return _error(
+        500,
+        "server_error",
+        tr("Something failed on the server. Check the api logs.", request_lang(request)),
+    )
+
+
+for r in (
+    system.router,
+    auth.router,
+    two_factor.router,
+    blueprints.router,
+    audit_log.router,
+    ai_engine.router,
+    ai_engine.privacy_router,  # P33: /api/ai-engine/privacy
+    agents.router,
+    sops.router,
+    tasks.router,
+    brain.router,
+    skills.router,
+    office.router,
+    monitor.router,
+    channels.router,
+    openai_compat.router,
+    org.router,
+    teams.router,
+    reports.router,
+    vault.router,
+    web_tasks.router,
+    workflows.router,
+    company_files.router,  # P24: before files, so /api/files/tree is not read as a file id
+    files.router,
+    documents.router,
+    packs.router,
+    mcp_servers.router,
+    workflow_runs.router,
+    whatsapp.router,
+    assistants.router,
+    learning.router,
+    lessons.router,  # P92: lessons people taught the agents
+    events_stream.router,
+    media.router,
+    library.router,
+    prefs.router,
+    impact.router,
+):
+    app.include_router(r)
+
+# Outermost, so even the CSRF and JSON checks answer in the person's language.
+app.add_middleware(LanguageMiddleware)
+
+# P104: the phone app's pages (capacitor://localhost, https://localhost) call the API from their
+# own origin. Only those origins, and never with cookies (allow_credentials stays off): the app
+# signs in with a bearer token (deps.session_token). Browsers on this site are not affected.
+# max_age: the WebView asks once per address per 2 hours, not before every call.
+if settings.app_origins.strip():
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in settings.app_origins.split(",") if o.strip()],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=[
+            "authorization",
+            "content-type",
+            "last-event-id",
+            APP_CLIENT_HEADER,
+            CSRF_HEADER,
+            LANG_HEADER,
+            "x-file-type",
+        ],
+        expose_headers=[
+            APP_SESSION_HEADER,
+            "content-disposition",
+            "x-next-cursor",
+            "x-total-count",
+            "x-screen-width",
+            "x-screen-height",
+            "retry-after",
+        ],
+        max_age=7200,
+    )
+
+# Meeting minutes from a recording: the upload streams raw bytes like /api/files.
+from .routers import minutes as minutes_router  # noqa: E402
+
+RAW_UPLOAD_PATHS.add(minutes_router.UPLOAD_PATH)
+app.include_router(minutes_router.router)
+
+# P21: company objectives (why work matters, progress and cost per objective).
+from .routers import objectives as objectives_router  # noqa: E402
+
+app.include_router(objectives_router.router)
+
+# P24: the AI drafts SOPs and workflows from company documents (and builds suggestions).
+from .routers import builders as builders_router  # noqa: E402
+
+app.include_router(builders_router.router)
+
+# P80: SharePoint / OneDrive folders in the Library (only their searchable text is kept).
+from .routers import linked_sources as linked_sources_router  # noqa: E402
+
+app.include_router(linked_sources_router.router)
+
+# P24: company documents intake (zip / many files / one file); raw bytes like /api/files.
+from .routers import intake as intake_router  # noqa: E402
+
+RAW_UPLOAD_PATHS.add(intake_router.UPLOAD_PATH)
+app.include_router(intake_router.router)
+
+# P25: search inside every document (files page by page, SOPs, documents), with suggestions.
+from .routers import search as search_router  # noqa: E402
+
+app.include_router(search_router.router)
+
+# P26: each person's workspace (desk).
+from .routers import desk as desk_router  # noqa: E402
+
+RAW_UPLOAD_PATHS.add("/api/desk/files")
+app.include_router(desk_router.router)
+
+# P27: company forms people fill in and hand back by a deadline.
+from .routers import forms as forms_router  # noqa: E402
+
+app.include_router(forms_router.router)
+
+
+# Task flow: a task into a workflow or a schedule, and the person's recent chats.
+from .routers import task_flow as task_flow_router  # noqa: E402
+
+app.include_router(task_flow_router.router)
+
+# P31: a person's own computers (the PC agent): linking, the connection, files, CDP relay.
+from .routers import devices as devices_router  # noqa: E402
+
+app.include_router(devices_router.router)
+
+# P34: Microsoft 365 / Outlook through Microsoft Graph (the app, personal Outlook, shared
+# mailboxes, mail activity, the Graph webhook).
+from .routers import microsoft as microsoft_router  # noqa: E402
+
+app.include_router(microsoft_router.router)
+
+# P109: the Microsoft 365 page (own mail, Teams, calendar, approvals, Ask AI) and a person's
+# other email accounts with their attachment backups.
+from .routers import m365 as m365_router  # noqa: E402
+from .routers import m365_meetings as m365_meetings_router  # noqa: E402
+from .routers import mail_accounts as mail_accounts_router  # noqa: E402
+
+app.include_router(m365_meetings_router.router)  # P109b: the tile, people, Teams meetings
+app.include_router(m365_router.router)
+app.include_router(mail_accounts_router.router)
+
+
+# P36: routines, jobs the office repeats without the paid model.
+from .routers import routines as routines_router  # noqa: E402
+
+app.include_router(routines_router.router)
+
+# P96: what each agent learned to do without the AI engine (procedures, reused answers).
+from .routers import procedures as procedures_router  # noqa: E402
+
+app.include_router(procedures_router.router)
+
+# P38: a person's way out of any stuck or failed task (stop now, finish by hand, retry on
+# another AI or agent).
+from .routers import task_rescue as task_rescue_router  # noqa: E402
+
+app.include_router(task_rescue_router.router)
+
+# P40: where company files are kept (the database, this server's disk, S3/B2 buckets, WebDAV
+# file servers), and storage imported into the Library.
+from .routers import storage as storage_router  # noqa: E402
+
+app.include_router(storage_router.router)
+
+# P42: the person's own computer from the web: health, files, the screen, mouse and keyboard.
+from .routers import remote as remote_router  # noqa: E402
+
+app.include_router(remote_router.router)
+
+# P44: inbox rules on a person's Outlook or a shared mailbox.
+from .routers import mail_rules as mail_rules_router  # noqa: E402
+
+app.include_router(mail_rules_router.router)
+
+# P48: everything waiting on this person, in one place (the bell).
+from .routers import needs as needs_router  # noqa: E402
+
+app.include_router(needs_router.router)
+
+
+RAW_UPLOAD_PATHS.add("/api/handoffs")  # the file is the body
+
+
+# P81: delete many files and SOPs at once (Library, Browse, SOPs).
+from .routers import bulk_delete as bulk_delete_router  # noqa: E402
+
+app.include_router(bulk_delete_router.router)
+
+
+# P92: Settings > Roles and access (owner only), and the owner's own sign-in email.
+from .routers import account as account_router  # noqa: E402
+
+app.include_router(account_router.router)
+
+
+# P114: each person's own notification settings (email, app, Telegram, WhatsApp).
+from .routers import my_notifications as my_notifications_router  # noqa: E402
+
+app.include_router(my_notifications_router.router)
+
+
+# P94: only the API process holds the PC sockets (devices/hub.py); the worker reaches them
+# through /internal/devices/*. Set here, not when a module is imported.
+from ..devices import bridge as _devices_bridge  # noqa: E402
+
+_devices_bridge.serve_here()
+
+# My Agentic: one Inbox for every email account, and WhatsApp chats from the connected number.
+from .routers import inbox as inbox_router  # noqa: E402
+
+app.include_router(inbox_router.router)
+
+from .routers import wa_chats as wa_chats_router  # noqa: E402
+
+app.include_router(wa_chats_router.router)

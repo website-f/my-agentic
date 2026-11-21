@@ -1,0 +1,420 @@
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+Mode = Literal["allow", "ask", "deny"]
+HEX = r"^#[0-9a-fA-F]{6}$"
+
+
+class ToolOut(BaseModel):
+    name: str
+    label: str
+    description: str
+    risk: str
+    default_mode: Mode
+    # When an agent has no setting for this tool, it uses its setting for this one instead.
+    follows: str | None = None
+
+
+class AgentIn(BaseModel):
+    branch_id: str
+    department_id: str | None = None
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=120)
+    template: str | None = None
+    soul: str = Field(default="", max_length=8000)
+    model_group: str = Field(default="smart", max_length=40)
+    tools: dict[str, Mode] = Field(default_factory=dict)
+    autonomy: Literal["ask", "auto"] = "ask"
+    sop_ids: list[str] = Field(default_factory=list, max_length=30)
+    color: str = Field(default="#13895f", pattern=HEX)
+    reports_to: str | None = None
+    role_kind: Literal["leaf", "orchestrator"] = "leaf"
+    max_parallel_children: int = Field(default=5, ge=1, le=10)
+    max_spawn_depth: int = Field(default=2, ge=1, le=3)
+    budget_daily_tokens: int | None = Field(default=None, ge=1000, le=100_000_000)
+    budget_monthly_usd: float | None = Field(default=None, ge=0.01, le=1_000_000)
+    heartbeat: bool = False
+    # P9: the signed-in person's own agent (always, for staff).
+    personal: bool = False
+    # P19: when it works (agents/work_hours.py); None = any time.
+    work_hours: dict[str, Any] | None = None
+
+
+class AgentUpdateIn(BaseModel):
+    branch_id: str | None = None
+    department_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: str | None = Field(default=None, min_length=1, max_length=120)
+    soul: str | None = Field(default=None, max_length=8000)
+    model_group: str | None = Field(default=None, max_length=40)
+    tools: dict[str, Mode] | None = None
+    autonomy: Literal["ask", "auto"] | None = None
+    sop_ids: list[str] | None = Field(default=None, max_length=30)
+    color: str | None = Field(default=None, pattern=HEX)
+    reports_to: str | None = None
+    status: Literal["active", "paused", "retired"] | None = None
+    role_kind: Literal["leaf", "orchestrator"] | None = None
+    max_parallel_children: int | None = Field(default=None, ge=1, le=10)
+    max_spawn_depth: int | None = Field(default=None, ge=1, le=3)
+    budget_daily_tokens: int | None = Field(default=None, ge=1000, le=100_000_000)
+    budget_monthly_usd: float | None = Field(default=None, ge=0.01, le=1_000_000)
+    heartbeat: bool | None = None
+    # P19: when it works; null = any time (validated by agents/work_hours.clean).
+    work_hours: dict[str, Any] | None = None
+
+
+class TaskBrief(BaseModel):
+    id: str
+    title: str
+    status: str
+
+
+class AgentOut(BaseModel):
+    id: str
+    slug: str
+    name: str
+    role: str
+    template: str | None
+    branch_id: str
+    branch_name: str
+    department_id: str | None
+    department_name: str | None
+    soul: str
+    model_group: str
+    tools: dict[str, str]
+    autonomy: str
+    sop_ids: list[str]
+    color: str
+    reports_to: str | None
+    status: str
+    role_kind: str
+    max_parallel_children: int
+    max_spawn_depth: int
+    budget_daily_tokens: int | None
+    budget_monthly_usd: float | None
+    heartbeat: bool
+    current_task: TaskBrief | None
+    open_tasks: int
+    created_at: datetime
+    owner_user_id: str | None = None
+    owner_name: str | None = None
+    clone_of: str | None = None
+    can_manage: bool = False
+    # Watched, not acted on (staff seeing a colleague's agent work): no chat, no tasks.
+    view_only: bool = False
+    private: bool = False
+    # P18: a staff member's AI twin (owner_name is the person it is the twin of).
+    is_twin: bool = False
+    # P19: its working hours (None = any time), a one-line summary, and whether it is on
+    # duty now: {"state": working|break|off|always, "on", "until", "label"}.
+    work_hours: dict[str, Any] | None = None
+    hours_label: str | None = None
+    duty: dict[str, Any] | None = None
+
+
+class PromptPreviewOut(BaseModel):
+    prompt: str
+    parts: list[dict[str, Any]]
+    tokens_estimate: int
+
+
+class SOPIn(BaseModel):
+    scope: Literal["workspace", "branch", "department", "library"]
+    scope_id: str | None = None
+    title: str = Field(min_length=1, max_length=160)
+    body: str = Field(default="", max_length=40_000)
+    # P24: SOPs people write are active at once; AI-written ones start as drafts.
+    status: Literal["active", "draft"] = "active"
+
+
+class SOPUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    body: str | None = Field(default=None, max_length=40_000)
+    # draft -> active approves an AI-written SOP (agents follow it from then on).
+    status: Literal["active", "draft"] | None = None
+
+
+class SOPOut(BaseModel):
+    id: str
+    scope: str
+    scope_id: str | None
+    scope_label: str
+    title: str
+    body: str
+    version: int
+    updated_by: str | None
+    updated_at: datetime
+    # P24: "draft" SOPs are never shown to agents; source files are the documents an
+    # AI-written SOP came from ({"id", "name"}; a removed file drops out).
+    status: str = "active"
+    source_file_ids: list[str] = Field(default_factory=list)
+    source_files: list[dict[str, str]] = Field(default_factory=list)
+    # P65: the knowledge pack it was imported from ("prima"); None for one people wrote.
+    pack: str | None = None
+
+
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=8000)
+    session_id: str | None = None
+    # P97: this conversation's own reply language: en, ms (standard Malay) or a dialect code
+    # (i18n.dialects); empty = the person's setting (Settings > Language).
+    reply_in: str | None = Field(default=None, max_length=24, pattern=r"^[a-z_]*$")
+
+
+class ChatOut(BaseModel):
+    session_id: str
+    reply: str
+    provider: str
+    model: str
+    tools_used: list[str]
+
+
+class SubtaskIn(BaseModel):
+    """P109: a sub-task of a person's task: its own title, person and due date."""
+
+    title: str = Field(min_length=1, max_length=200)
+    assignee_user_id: str | None = Field(default=None, max_length=40)
+    due_at: datetime | None = None
+
+
+class TaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    brief: str = Field(default="", max_length=20_000)
+    assignee_agent_id: str | None = None
+    priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    requires_review: bool = True
+    start: bool = False
+    labels: list[str] = Field(default_factory=list, max_length=8)
+    file_ids: list[str] = Field(default_factory=list, max_length=20)  # P10: files for the task
+    goal: str | None = Field(default=None, max_length=2000)  # P13: keep going until this is met
+    # Follow this workflow as the task's procedure (its steps are added to the brief).
+    workflow_id: str | None = Field(default=None, max_length=40)
+    objective_id: str | None = Field(default=None, max_length=40)  # P21: the objective it serves
+    # P21 accountable work: start only when these tasks are done; this task's own review
+    # stages ({stages, max_rounds}; {"stages": []} switches the inherited ones off).
+    blocked_by: list[str] = Field(default_factory=list, max_length=20)
+    review_policy: dict[str, Any] | None = None
+    # P26: who else may look at it (managers and owners only; default private).
+    visibility: Literal["private", "department", "company", "everyone"] = "private"
+    # P97: a task for a person (a member) instead of an agent (never both), and its due time.
+    assignee_user_id: str | None = Field(default=None, max_length=40)
+    due_at: datetime | None = None
+    # P109: a task for people: one or many assignees (assignee_user_id, if set, is the
+    # first), watchers who follow it, when it starts, what kind of work it is, its checklist
+    # and its sub-tasks (each its own person's task).
+    assignee_user_ids: list[str] = Field(default_factory=list, max_length=25)
+    watcher_user_ids: list[str] = Field(default_factory=list, max_length=25)
+    start_at: datetime | None = None
+    category: str | None = Field(default=None, max_length=40)
+    checklist: list[str] = Field(default_factory=list, max_length=50)
+    subtasks: list[SubtaskIn] = Field(default_factory=list, max_length=20)
+
+
+class TaskUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    brief: str | None = Field(default=None, max_length=20_000)
+    priority: Literal["low", "normal", "high", "urgent"] | None = None
+    assignee_agent_id: str | None = None
+    # P97: running, blocked and review are moves only a person's task makes by hand.
+    status: (
+        Literal["triage", "ready", "running", "blocked", "review", "done", "cancelled"] | None
+    ) = None
+    position: float | None = None
+    labels: list[str] | None = Field(default=None, max_length=8)
+    objective_id: str | None = Field(default=None, max_length=40)  # P21: null unlinks
+    # P26: who else may look at it (managers and owners only).
+    visibility: Literal["private", "department", "company", "everyone"] | None = None
+    # P97: give it to a person (null takes it back) and when it is due (null clears it).
+    assignee_user_id: str | None = Field(default=None, max_length=40)
+    due_at: datetime | None = None
+    # P109: when it starts (null clears it) and what kind of work it is.
+    start_at: datetime | None = None
+    category: str | None = Field(default=None, max_length=40)
+
+
+class TaskOut(BaseModel):
+    id: str
+    title: str
+    brief: str
+    status: str
+    priority: str
+    assignee_agent_id: str | None
+    assignee_name: str | None
+    assignee_color: str | None
+    source: str
+    requires_review: bool
+    result: str | None
+    error: str | None
+    blocked_reason: str | None
+    run_count: int
+    steps_used: int
+    pending_approvals: int
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    parent_task_id: str | None = None
+    depth: int = 0
+    schedule_id: str | None = None
+    has_output_schema: bool = False
+    labels: list[str] = []
+    branch_id: str | None = None
+    # Board order within a column (lower first); PATCH {position} reorders.
+    position: float = 0
+    goal: str | None = None
+    goal_tries: int = 0
+    # Lists cut brief and result short (GET /api/tasks/{id} has the full text).
+    truncated: bool = False
+    # P21: the objective it serves (lists fill the title) and the first task of its request.
+    objective_id: str | None = None
+    objective_title: str | None = None
+    root_task_id: str | None = None
+    # P21 accountable work: who moves it next and what they must do ("user:<id>" or
+    # "agent:<id>", with the name), the unfinished tasks it waits for, whether a person may
+    # start it by hand while it is blocked (parked, no live run), review round, and minutes
+    # without agent activity while running (detail only).
+    blocked_owner: str | None = None
+    blocked_owner_name: str | None = None
+    blocked_action: str | None = None
+    waiting_for: list[dict[str, Any]] = []
+    restartable: bool = False
+    review_round: int = 0
+    quiet_minutes: int | None = None
+    # P26: who else may look at it.
+    visibility: str = "private"
+    # P97: the person it is for (instead of an agent), their name, who gave it, when it is due.
+    assignee_user_id: str | None = None
+    assignee_user_name: str | None = None
+    created_by_name: str | None = None
+    due_at: datetime | None = None
+    # P109: a task for people: when it starts, its kind of work, everyone it is for and who
+    # follows it ([{user_id, name}], the first assignee first), and the card's counts.
+    start_at: datetime | None = None
+    category: str | None = None
+    assignees: list[dict[str, str]] = []
+    watchers: list[dict[str, str]] = []
+    checklist_done: int = 0
+    checklist_total: int = 0
+    subtasks_done: int = 0
+    subtasks_total: int = 0
+    files_count: int = 0
+    # P114: the person whose request this is (it counts against their daily AI allowance), and
+    # whose AI does it (staff rename their AI as they like, so the name alone may not say).
+    for_user_id: str | None = None
+    for_user_name: str | None = None
+    assignee_owner_id: str | None = None
+    assignee_owner_name: str | None = None
+
+
+class TaskEventOut(BaseModel):
+    id: int
+    ts: datetime
+    kind: str
+    actor: str
+    actor_name: str | None
+    text: str
+    data: dict[str, Any] | None
+
+
+class ReviseIn(BaseModel):
+    feedback: str = Field(min_length=1, max_length=8000)
+
+
+class ApprovalOut(BaseModel):
+    id: str
+    kind: str
+    tool_name: str
+    tool_label: str
+    args: dict[str, Any]
+    reason: str
+    risk: str
+    rule: str
+    status: str
+    scope: str | None
+    answer: str | None
+    decided_by: str | None
+    decided_by_name: str | None
+    decided_at: datetime | None
+    created_at: datetime
+    expires_at: datetime
+    task_id: str
+    task_title: str
+    agent_id: str
+    agent_name: str
+    agent_color: str
+
+
+class DecisionIn(BaseModel):
+    decision: Literal["approve", "deny", "answer"]
+    scope: Literal["once", "always"] = "once"
+    answer: str | None = Field(default=None, max_length=8000)
+
+
+class TaskDetailOut(BaseModel):
+    task: TaskOut
+    # P26: shown because it was shared with this person: look only, no transcript or approvals.
+    read_only: bool = False
+    events: list[TaskEventOut]
+    approvals: list[ApprovalOut]
+    transcript: list[dict[str, Any]]
+    children: list[TaskOut] = []
+    parent: TaskOut | None = None
+    meetings: list[dict[str, Any]] = []
+    # P21: {id, title, target, status, parent_title} and what the whole request cost:
+    # {root_task_id, tasks, usd, tokens}.
+    objective: dict[str, Any] | None = None
+    request: dict[str, Any] | None = None
+    # P21: every task it waits for (any status), the tasks that wait for it, the review
+    # history [{round, stage, decision, notes, reviewer_name, ts, review_task_id}], and the
+    # review stages that apply ({stages, max_rounds, summary}) or None.
+    blockers: list[dict[str, Any]] = []
+    blocking: list[dict[str, Any]] = []
+    reviews: list[dict[str, Any]] = []
+    review_policy: dict[str, Any] | None = None
+    # P109: the checklist [{id, text, done, position, done_by_name, done_at}].
+    checklist: list[dict[str, Any]] = []
+
+
+class Audience(BaseModel):
+    all: bool = False
+    branch_ids: list[str] = Field(default_factory=list)
+    department_ids: list[str] = Field(default_factory=list)
+    agent_ids: list[str] = Field(default_factory=list)
+
+
+class BroadcastIn(BaseModel):
+    audience: Audience
+    mode: Literal["announcement", "directive"] = "announcement"
+    body: str = Field(min_length=1, max_length=8000)
+    request_reply: bool = False
+
+
+class ReceiptOut(BaseModel):
+    agent_id: str
+    agent_name: str
+    agent_role: str
+    agent_color: str
+    department_name: str | None
+    branch_name: str
+    delivered_at: datetime
+    ack_at: datetime | None
+    reply: str | None
+    task_id: str | None
+
+
+class BroadcastOut(BaseModel):
+    id: str
+    sender: str
+    sender_name: str | None
+    audience: dict[str, Any]
+    audience_label: str
+    mode: str
+    request_reply: bool
+    body: str
+    created_at: datetime
+    targets: int
+    acked: int
+    receipts: list[ReceiptOut] | None = None

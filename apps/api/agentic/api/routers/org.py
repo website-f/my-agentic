@@ -1,0 +1,344 @@
+"""The owner's company (a branch) and the departments its agents sit in.
+
+My Agentic is for one person: setup makes the one company; there are no organization screens.
+These routes stay for the pickers (an agent's department) and the starter AI teams."""
+
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...core.db import get_db
+from ...engine import privacy
+from ...models import Branch, Department
+from ...org import starter
+from ...org.names import org_name, spaced
+from ...services import audit, events
+from ...services.text import slugify
+from ..deps import Principal, api_error, require
+from ..schemas import (
+    BranchCreateIn,
+    BranchOut,
+    BranchUpdateIn,
+    DepartmentCreateIn,
+    DepartmentOut,
+    DepartmentUpdateIn,
+    StarterTeamIn,
+)
+
+router = APIRouter(prefix="/api", tags=["organization"])
+
+DEFAULT_DEPARTMENTS = ("Management", "Finance", "Research", "Operations", "Data", "Writing")
+
+
+def _dept_out(d: Department) -> DepartmentOut:
+    return DepartmentOut(
+        id=d.id, branch_id=d.branch_id, name=d.name, slug=d.slug, position=d.position
+    )
+
+
+def _branch_out(b: Branch) -> BranchOut:
+    return BranchOut(
+        id=b.id,
+        name=b.name,
+        slug=b.slug,
+        color=b.color,
+        isolated=b.isolated,
+        created_at=b.created_at,
+        departments=[_dept_out(d) for d in b.departments],
+        industry=b.industry or "",
+        data_level=b.data_level or "standard",
+    )
+
+
+def _industry(raw: str | None) -> str:
+    key = (raw or "general").strip().lower()
+    if key not in starter.INDUSTRIES:
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST,
+            "bad_industry",
+            "Pick an industry: {names}.",
+            names=", ".join(starter.INDUSTRIES),
+        )
+    return key
+
+
+async def _publish_team(workspace_id: str, res: starter.StarterResult) -> None:
+    for p in res.created:
+        await events.publish(workspace_id, "agent.upsert", {"agent_id": p.agent_id, "name": p.name})
+
+
+async def _branch(db: AsyncSession, workspace_id: str, branch_id: str) -> Branch:
+    b = await db.get(Branch, branch_id)
+    if b is None or b.workspace_id != workspace_id:
+        raise api_error(status.HTTP_404_NOT_FOUND, "branch_not_found", "That branch is not here.")
+    return b
+
+
+async def _reload(db: AsyncSession, branch_id: str) -> Branch:
+    """Fresh load after commit, so server defaults and the department list are populated
+    eagerly (async sessions cannot lazy-load on attribute access)."""
+    b = await db.scalar(
+        select(Branch).where(Branch.id == branch_id).execution_options(populate_existing=True)
+    )
+    assert b is not None
+    return b
+
+
+async def _department(db: AsyncSession, workspace_id: str, dept_id: str) -> Department:
+    d = await db.get(Department, dept_id)
+    if d is None or d.workspace_id != workspace_id:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND, "department_not_found", "That department is not here."
+        )
+    return d
+
+
+def _name(raw: str) -> str:
+    """P111: an organization's name in capitals, trimmed, single spaces (org/names.py)."""
+    name = org_name(raw)
+    if not name:
+        raise api_error(status.HTTP_400_BAD_REQUEST, "name_required", "Give the company a name.")
+    return name
+
+
+async def _unique_slug(
+    db: AsyncSession, model, scope_col, scope_val: str, name: str, fallback: str
+) -> str:
+    base = slugify(name, fallback)
+    slug, n = base, 2
+    while await db.scalar(
+        select(func.count()).select_from(model).where(scope_col == scope_val, model.slug == slug)
+    ):
+        slug, n = f"{base}-{n}", n + 1
+    return slug
+
+
+@router.get("/branches")
+async def list_branches(
+    principal: Principal = Depends(require("read")), db: AsyncSession = Depends(get_db)
+) -> list[BranchOut]:
+    q = select(Branch).where(Branch.workspace_id == principal.workspace_id)
+    sc = principal.scope
+    if not sc.everything:
+        # Office roles see their own company only: not the other companies' names or
+        # settings (the switcher showed only theirs, but the list held every one).
+        q = q.where(sc.branch_col(Branch.id))  # P98: each of their companies
+    rows = (await db.scalars(q.order_by(Branch.created_at))).all()
+    return [_branch_out(b) for b in rows]
+
+
+@router.get("/branches/starter-teams")
+async def starter_teams(_: Principal = Depends(require("read"))) -> list[dict]:
+    """Industries and the ready-made AI team each brings, for the "Add company" preview."""
+    return starter.catalog()
+
+
+@router.post("/branches/{branch_id}/starter-team")
+async def add_starter_team(
+    branch_id: str,
+    body: StarterTeamIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Add (or top up) a company's starter team. Idempotent: roles it has are skipped."""
+    b = await _branch(db, principal.workspace_id, branch_id)
+    industry = _industry(body.industry)
+    if not b.industry:
+        b.industry = industry
+    res = await starter.add_starter_team(db, b, industry, principal.actor)
+    await db.commit()
+    await _publish_team(principal.workspace_id, res)
+    return {**res.public(), "branch": _branch_out(await _reload(db, b.id)).model_dump()}
+
+
+@router.post("/branches", status_code=status.HTTP_201_CREATED)
+async def create_branch(
+    body: BranchCreateIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> BranchOut:
+    industry = _industry(body.industry) if body.industry or body.starter_team else ""
+    name = _name(body.name)
+    slug = await _unique_slug(
+        db, Branch, Branch.workspace_id, principal.workspace_id, name, "branch"
+    )
+    b = Branch(
+        workspace_id=principal.workspace_id,
+        name=name,
+        slug=slug,
+        color=body.color,
+        isolated=body.isolated,
+        industry=industry,
+    )
+    db.add(b)
+    await db.flush()
+    seeded = DEFAULT_DEPARTMENTS if body.seed_departments else ()
+    db.add_all(
+        Department(
+            workspace_id=principal.workspace_id, branch_id=b.id, name=n, slug=slugify(n), position=i
+        )
+        for i, n in enumerate(seeded)
+    )
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "branch.created",
+        target=b.id,
+        after={"name": name, "departments": len(seeded), "industry": industry or None},
+    )
+    await db.commit()
+    privacy.invalidate(principal.workspace_id)  # the new company's name is masked at once
+    bid = b.id
+    if not body.starter_team:
+        return _branch_out(await _reload(db, bid))
+    # The team goes in after the branch is saved, so the departments it reuses exist.
+    res = await starter.add_starter_team(db, await _reload(db, bid), industry, principal.actor)
+    await db.commit()
+    await _publish_team(principal.workspace_id, res)
+    out = _branch_out(await _reload(db, bid))
+    out.starter = res.public()
+    return out
+
+
+@router.patch("/branches/{branch_id}")
+async def update_branch(
+    branch_id: str,
+    body: BranchUpdateIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> BranchOut:
+    b = await _branch(db, principal.workspace_id, branch_id)
+    before = {
+        "name": b.name,
+        "color": b.color,
+        "isolated": b.isolated,
+        "data_level": b.data_level,
+    }
+    if body.name is not None:
+        b.name = _name(body.name)
+    if body.color is not None:
+        b.color = body.color
+    if body.isolated is not None:
+        b.isolated = body.isolated
+    if body.data_level is not None:
+        b.data_level = body.data_level  # P33: which AI providers may see its work
+    after = {"name": b.name, "color": b.color, "isolated": b.isolated, "data_level": b.data_level}
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "branch.updated",
+        target=b.id,
+        before=before,
+        after=after,
+    )
+    await db.commit()
+    privacy.invalidate(principal.workspace_id)  # a renamed company is masked by its new name
+    return _branch_out(await _reload(db, branch_id))
+
+
+@router.delete("/branches/{branch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_branch(
+    branch_id: str,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    b = await _branch(db, principal.workspace_id, branch_id)
+    before = {"name": b.name, "departments": len(b.departments)}
+    await db.delete(b)
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "branch.deleted",
+        target=branch_id,
+        before=before,
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/branches/{branch_id}/departments", status_code=status.HTTP_201_CREATED)
+async def create_department(
+    branch_id: str,
+    body: DepartmentCreateIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> DepartmentOut:
+    b = await _branch(db, principal.workspace_id, branch_id)
+    name = spaced(body.name)  # P111: departments keep their case (org/names.py)
+    slug = await _unique_slug(db, Department, Department.branch_id, b.id, name, "department")
+    position = (max((d.position for d in b.departments), default=-1)) + 1
+    d = Department(
+        workspace_id=principal.workspace_id, branch_id=b.id, name=name, slug=slug, position=position
+    )
+    db.add(d)
+    await db.flush()
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "department.created",
+        target=d.id,
+        after={"name": name, "branch": b.name},
+    )
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            "department_exists",
+            "{branch} already has a department called {name}.",
+            branch=b.name,
+            name=name,
+        ) from e
+    return _dept_out(d)
+
+
+@router.patch("/departments/{dept_id}")
+async def update_department(
+    dept_id: str,
+    body: DepartmentUpdateIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> DepartmentOut:
+    d = await _department(db, principal.workspace_id, dept_id)
+    before = {"name": d.name, "position": d.position}
+    if body.name is not None:
+        d.name = spaced(body.name)
+    if body.position is not None:
+        d.position = body.position
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "department.updated",
+        target=d.id,
+        before=before,
+        after={"name": d.name, "position": d.position},
+    )
+    await db.commit()
+    return _dept_out(d)
+
+
+@router.delete("/departments/{dept_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_department(
+    dept_id: str,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    d = await _department(db, principal.workspace_id, dept_id)
+    before = {"name": d.name, "branch_id": d.branch_id}
+    await db.delete(d)
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "department.deleted",
+        target=dept_id,
+        before=before,
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

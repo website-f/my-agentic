@@ -1,0 +1,367 @@
+"""Who sees which agents and work (P9 office roles).
+
+Workspace roles (owner, admin, operator, approver, viewer) see everything. Office roles see
+a slice: a branch manager their branch, a HOD and a supervisor their department, staff the
+agents they own. Everyone also sees their own personal agents and the tasks they created.
+Tasks follow their agent; approvals follow the agent that asked.
+
+Two more rules (P16):
+- A private agent (someone's personal assistant) is seen only by its owner: not by admins,
+  not by the workspace owner, not in lists, the office, tasks, approvals or live events.
+- Seeing is not the same as watching: staff *watch* the other (non-private) agents of their
+  branch work (`observe_where` / `observes_agent`: lists, office floor, live activity) but
+  act only on what they see (`sees_agent`: chat, tasks, approvals, settings).
+
+Every list is filtered in SQL with `agent_where` / `task_where`; every single-row read and
+write checks `sees_agent` / `sees_task` / `manages_agent`, and answers 404 when the row is
+outside the scope (so a scoped user cannot probe what exists elsewhere).
+
+Shared tasks (P26): a manager or owner may let more people *look at* a task they give
+(`visibility`: department, company, everyone). That widens only the task board and the task
+itself, read only (`shared_task_where` / `shares_task`); it never lets anyone change the
+task, see its agent's transcript or approvals, or reach its files.
+
+People's tasks (P97): a task may be for a person (`assignee_user_id`) instead of an agent.
+Besides what each scope saw before, a person sees the tasks given to them, and a manager
+the tasks of the people who report to them (`team`, loaded with the session; P120: everyone
+below them on the organization chart, down the whole line, for any scoped role, staff too). A
+branch manager also sees their branch's people's tasks (the task carries the person's branch).
+Nothing else widens: no one sees a person's task because of their department alone, and staff
+see only their own and those of the people under them.
+
+Several branches (P98): a member may work in more than one branch (membership_branches,
+teams/branches.py). `branch_ids` is all of them (home first); every branch rule here and in
+the routers reads "one of their branches" instead of "their branch": a branch manager of two
+branches sees and manages both, never a third; staff watch the offices of each of their
+branches; a branch's shared tasks, uploads and records reach the people of every branch they
+are in. `branch_id` stays the home branch: where something new they make is filed when they
+do not pick a branch. Department scope does not widen (a department is in one branch).
+"""
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import ColumnElement, and_, false, or_, select
+
+from ..core.security import COMPANY_ROLES, SCOPED_ROLES
+from ..i18n import Msg
+from ..models import Agent, Approval, Task
+from ..teams.task_models import ASSIGNEE, TaskPerson
+
+
+@dataclass(frozen=True)
+class Scope:
+    kind: str  # all | branch | department | own
+    user_id: str
+    branch_id: str | None = None
+    department_id: str | None = None
+    # P97: the people who report to this person. P120: everyone below them on the chart.
+    team: frozenset[str] = frozenset()
+    # P98: every branch they work in (the home branch_id included).
+    branch_ids: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if self.branch_id and self.branch_id not in self.branch_ids:  # the home always counts
+            object.__setattr__(self, "branch_ids", self.branch_ids | {self.branch_id})
+
+    @classmethod
+    def of(
+        cls,
+        role: str,
+        user_id: str,
+        branch_id: str | None,
+        department_id: str | None,
+        team: frozenset[str] = frozenset(),
+        branch_ids: Iterable[str] = (),
+    ) -> "Scope":
+        if role not in SCOPED_ROLES:
+            return cls("all", user_id, team=team)
+        every = frozenset(b for b in (branch_id, *branch_ids) if b)
+        if role in COMPANY_ROLES:  # P120: a group HOD too, over each of their companies
+            return cls("branch", user_id, branch_id, department_id, team, every)
+        if role in ("hod", "supervisor"):
+            return cls("department", user_id, branch_id, department_id, team, every)
+        # P120: staff may have people under them on the organization chart (`team`).
+        return cls("own", user_id, branch_id, department_id, team, every)
+
+    @classmethod
+    def of_member(cls, m: Any, team: frozenset[str] = frozenset()) -> "Scope":
+        """The scope of a loaded Membership (its branches come with it)."""
+        return cls.of(m.role, m.user_id, m.branch_id, m.department_id, team, m.branch_ids)
+
+    def in_branch(self, branch_id: str | None) -> bool:
+        """P98: one of their branches (home or another)."""
+        return bool(branch_id) and branch_id in self.branch_ids
+
+    def branch_col(self, col: Any) -> ColumnElement[bool]:
+        """P98: SQL: this column is one of their branches (never true without a branch)."""
+        return col.in_(sorted(self.branch_ids)) if self.branch_ids else false()
+
+    @property
+    def everything(self) -> bool:
+        return self.kind == "all"
+
+    @property
+    def actor(self) -> str:
+        return f"user:{self.user_id}"
+
+    @property
+    def label(self) -> str:
+        """For sentences ("Pick an agent from {where}."): English, translated with them."""
+        if self.kind == "branch" and len(self.branch_ids) > 1:
+            return Msg("your branches")  # P98
+        return Msg(
+            {
+                "all": "the whole workspace",
+                "branch": "your branch",
+                "department": "your department",
+                "own": "your own agents",
+            }[self.kind]
+        )
+
+    # ------------------------------------------------------------ agents
+
+    def _open(self) -> ColumnElement[bool]:
+        """Not someone else's private assistant."""
+        return or_(Agent.private.is_(False), Agent.owner_user_id == self.user_id)
+
+    def agent_where(self) -> ColumnElement[bool]:
+        """SQL condition on Agent: the agents this person sees and acts on."""
+        mine = Agent.owner_user_id == self.user_id
+        if self.everything:
+            return self._open()
+        if self.kind == "branch":
+            base = or_(self.branch_col(Agent.branch_id), mine) if self.branch_ids else mine
+        elif self.kind == "department":
+            base = (
+                or_(Agent.department_id == self.department_id, mine) if self.department_id else mine
+            )
+        else:
+            base = mine
+        return and_(base, self._open())
+
+    def observe_where(self) -> ColumnElement[bool]:
+        """The agents this person may watch working: what they see, plus (for staff) the
+        rest of their branch's office."""
+        if self.kind != "own":
+            return self.agent_where()
+        mine = Agent.owner_user_id == self.user_id
+        # Staff without a company (theirs was deleted) watch no office, never every one.
+        office = self.branch_col(Agent.branch_id)
+        return and_(or_(mine, office), self._open())
+
+    def observes_agent(self, a: Agent | None) -> bool:
+        if a is None or (a.private and a.owner_user_id != self.user_id):
+            return False
+        if self.sees_agent(a):
+            return True
+        return self.kind == "own" and self.in_branch(a.branch_id)
+
+    def sees_agent(self, a: Agent | None) -> bool:
+        if a is None:
+            return False
+        if a.private and a.owner_user_id != self.user_id:
+            return False
+        if self.everything or a.owner_user_id == self.user_id:
+            return True
+        if self.kind == "branch":
+            return self.in_branch(a.branch_id)
+        if self.kind == "department":
+            return bool(self.department_id) and a.department_id == self.department_id
+        return False
+
+    def manages_agent(self, a: Agent, role_perms: frozenset[str] | list[str]) -> bool:
+        """May change this agent: agents.manage inside the scope, or agents.own for one's own."""
+        if "agents.manage" in role_perms and self.sees_agent(a):
+            return True
+        return "agents.own" in role_perms and a.owner_user_id == self.user_id
+
+    def placement_ok(self, branch_id: str, department_id: str | None) -> bool:
+        """Where a new or moved agent may go."""
+        if self.everything:
+            return True
+        if self.kind == "branch":
+            return self.in_branch(branch_id)
+        if self.kind == "department":
+            return department_id is not None and department_id == self.department_id
+        return True  # personal agents may sit anywhere; they stay the owner's
+
+    # ------------------------------------------------------------ tasks and approvals
+
+    def _visible_agent_ids(self) -> Any:
+        return select(Agent.id).where(self.agent_where())
+
+    def _others_private_ids(self) -> Any:
+        return select(Agent.id).where(
+            Agent.private.is_(True),
+            or_(Agent.owner_user_id.is_(None), Agent.owner_user_id != self.user_id),
+        )
+
+    def task_where(self) -> ColumnElement[bool] | None:
+        if self.everything:  # everything but other people's assistants' work
+            return or_(
+                Task.assignee_agent_id.is_(None),
+                Task.assignee_agent_id.not_in(self._others_private_ids()),
+                Task.created_by == self.actor,
+            )
+        parts: list[ColumnElement[bool]] = [
+            Task.assignee_agent_id.in_(self._visible_agent_ids()),
+            Task.created_by == self.actor,
+            Task.assignee_user_id.in_([self.user_id, *sorted(self.team)]),  # P97
+            # P109: a task they are on (another assignee, or a watcher), and their people's.
+            Task.id.in_(select(TaskPerson.task_id).where(TaskPerson.user_id == self.user_id)),
+        ]
+        if self.team:
+            parts.append(
+                Task.id.in_(
+                    select(TaskPerson.task_id).where(
+                        TaskPerson.user_id.in_(sorted(self.team)), TaskPerson.role == ASSIGNEE
+                    )
+                )
+            )
+        if self.kind == "branch" and self.branch_ids:
+            parts.append(self.branch_col(Task.branch_id))  # unassigned work in their branches
+        return or_(*parts)
+
+    def sees_person_task(self, t: Task) -> bool:
+        """P97: a task given to this person or to someone who reports to them."""
+        uid = getattr(t, "assignee_user_id", None)
+        return bool(uid) and (uid == self.user_id or uid in self.team)
+
+    def sees_task(self, t: Task, agent: Agent | None) -> bool:
+        if t.created_by == self.actor or self.sees_person_task(t):
+            return True
+        if agent is not None and agent.private and agent.owner_user_id != self.user_id:
+            return False
+        if self.everything:
+            return True
+        if agent is not None and self.sees_agent(agent):
+            return True
+        return self.kind == "branch" and self.in_branch(t.branch_id)
+
+    def shared_task_where(self) -> ColumnElement[bool] | None:
+        """Tasks shared with this person to look at (beyond what `task_where` gives)."""
+        if self.everything:
+            return None
+        parts: list[ColumnElement[bool]] = [Task.visibility == "everyone"]
+        if self.branch_ids:
+            parts.append(and_(Task.visibility == "company", self.branch_col(Task.branch_id)))
+        if self.department_id:
+            dept = select(Agent.id).where(Agent.department_id == self.department_id)
+            parts.append(and_(Task.visibility == "department", Task.assignee_agent_id.in_(dept)))
+        return and_(Task.assignee_agent_id.not_in(self._others_private_ids()), or_(*parts))
+
+    def shares_task(self, t: Task, agent: Agent | None) -> bool:
+        """May look at this task (read only) because it was shared with them."""
+        if agent is not None and agent.private and agent.owner_user_id != self.user_id:
+            return False
+        v = getattr(t, "visibility", "private")
+        if v == "everyone":
+            return True
+        if v == "company":
+            return self.in_branch(t.branch_id)
+        if v == "department":
+            return (
+                bool(self.department_id)
+                and agent is not None
+                and (agent.department_id == self.department_id)
+            )
+        return False
+
+    def approval_where(self) -> ColumnElement[bool] | None:
+        if self.everything:
+            return Approval.agent_id.not_in(self._others_private_ids())
+        return Approval.agent_id.in_(self._visible_agent_ids())
+
+    # ------------------------------------------------------------ live events
+
+    def event_visible(
+        self,
+        type_: str,
+        data: dict[str, Any],
+        agent_ids: set[str],
+        watched: frozenset[str] | set[str] = frozenset(),
+    ) -> bool:
+        """Live events: an agent's events reach the people who see that agent; office
+        knowledge (brain, skills) reaches everyone; workspace plumbing (deliveries, incidents,
+        job runs, broadcasts) only the workspace roles. A person's own computers (P31)
+        reach only that person."""
+        if type_ in PERSONAL_EVENTS:
+            return bool(data.get("user_id")) and data.get("user_id") == self.user_id
+        if type_.startswith("mail."):  # P34: only who may see that mailbox (microsoft/access)
+            viewers = data.get("viewer_ids")
+            return isinstance(viewers, list) and self.user_id in viewers
+        if type_ in KNOWLEDGE_EVENTS:
+            return True
+        if type_ in BRANCH_EVENTS:  # P24: a company's uploads reach the people of it
+            return self.everything or self.in_branch(data.get("branch_id"))
+        person = data.get("assignee_user_id")  # P97: a person's task: them and their managers
+        if person and not (data.get("agent_id") or data.get("assignee_agent_id")):
+            # P109: everyone on it (assignees and watchers) and the managers of its assignees.
+            on = data.get("people") if isinstance(data.get("people"), list) else []
+            doers = data.get("assignees") if isinstance(data.get("assignees"), list) else []
+            return (
+                self.everything
+                or person == self.user_id
+                or person in self.team
+                or self.user_id in on
+                or any(d in self.team for d in doers)
+                or data.get("giver") == self.user_id
+                or data.get("by") == self.actor
+                or (self.kind == "branch" and self.in_branch(data.get("branch_id")))
+            )
+        aid = data.get("agent_id") or data.get("assignee_agent_id")
+        if aid:
+            return aid in agent_ids or (type_ in WATCH_EVENTS and aid in watched)
+        if self.everything:
+            return True
+        parts = data.get("participants")
+        if isinstance(parts, list):
+            return any(p in agent_ids for p in parts)
+        return False
+
+
+# What watching an agent shows: that it is working and on what step, not its tasks' contents.
+WATCH_EVENTS = frozenset({"agent.status", "agent.thinking", "agent.activity", "agent.upsert"})
+# The fields a watcher gets of those events (no task title, thoughts, tool arguments,
+# results or answers): busy or idle, and the kind of step.
+WATCH_FIELDS = frozenset({"agent_id", "agent_name", "name", "status", "on", "kind", "tool"})
+
+
+def watch_view(type_: str, data: dict[str, Any], agent_ids: set[str]) -> dict[str, Any]:
+    """An event as this person may see it: in full for the agents they see, trimmed to
+    WATCH_FIELDS for the colleagues' agents they only watch."""
+    aid = data.get("agent_id")
+    if type_ not in WATCH_EVENTS or not aid or aid in agent_ids:
+        return data
+    return {k: v for k, v in data.items() if k in WATCH_FIELDS}
+
+
+BRANCH_EVENTS = frozenset({"intake.updated"})
+
+# P31: about one person's own computer (online, settings): for that person only.
+PERSONAL_EVENTS = frozenset({"device.status", "device.updated"})
+
+KNOWLEDGE_EVENTS = frozenset(
+    {"brain.page", "brain.dream", "skill.proposal", "skill.updated", "skill.used"}
+)
+
+
+def visible_agent_ids_sync(rows: list[Agent], scope: Scope) -> set[str]:
+    return {a.id for a in rows if scope.sees_agent(a)}
+
+
+async def member_scope(db: Any, workspace_id: str, user_id: str) -> Scope | None:
+    """The scope of a member found by id (phone buttons, Telegram), or None if not one."""
+    from ..models import Membership
+
+    m = await db.get(Membership, (workspace_id, user_id))
+    if m is None:
+        return None
+    return Scope.of_member(m)
+
+
+async def member_sees_agent(db: Any, workspace_id: str, user_id: str, agent_id: str) -> bool:
+    sc = await member_scope(db, workspace_id, user_id)
+    return sc is not None and sc.sees_agent(await db.get(Agent, agent_id))

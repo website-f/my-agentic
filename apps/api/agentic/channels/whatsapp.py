@@ -1,0 +1,702 @@
+"""WhatsApp (P16): one office number, two ways to connect it.
+
+- WAHA (self-hosted WhatsApp HTTP API, devlikeapro/waha): the office phone scans a QR code
+  shown in the dashboard. Free and quick for testing and small offices. It is unofficial:
+  message only people who linked themselves, never bulk-send, or WhatsApp may ban the number.
+- Meta Cloud API (official): a WhatsApp Business number with a permanent token. Free-form
+  text reaches someone only within 24 hours of their last message; outside that window an
+  approved template is used (set its name in the channel).
+
+People link their own WhatsApp by sending a one-time code to the office number, exactly like
+Telegram, so only people who asked for it ever get messages.
+"""
+
+import asyncio
+import base64
+import contextlib
+import hashlib
+import hmac
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+
+GRAPH = "https://graph.facebook.com/v21.0"
+# Appended (invisibly) to everything we send through WAHA. When the office number is the
+# owner's own phone they talk to their assistant in "Message yourself", where our replies also
+# arrive as the owner's own messages: the mark stops the assistant answering itself.
+MARK = "\u2063"
+WAHA_EVENTS = ["message.any", "session.status"]
+# My Agentic: the NOWEB engine keeps chats, contacts and messages (the WhatsApp page).
+STORE = {"noweb": {"store": {"enabled": True, "fullSync": False}}}
+transport: httpx.AsyncBaseTransport | None = None  # tests swap in a fake
+
+
+class WhatsAppError(Exception):
+    def __init__(self, message: str, status: int = 0, code: int | None = None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+@dataclass
+class Config:
+    provider: str = "waha"  # waha | meta
+    # WAHA
+    base_url: str = ""
+    api_key: str = ""
+    session: str = "default"
+    webhook_secret: str = ""
+    # Meta Cloud API
+    phone_number_id: str = ""
+    token: str = ""
+    app_secret: str = ""
+    verify_token: str = ""
+    template: str = ""
+    template_lang: str = "en"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, raw: str) -> "Config":
+        data = json.loads(raw or "{}")
+        known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k != "extra"}
+        return cls(**known)
+
+    def dump(self) -> str:
+        return json.dumps({k: v for k, v in self.__dict__.items() if k != "extra"})
+
+
+def digits(phone: str) -> str:
+    return re.sub(r"\D", "", phone or "")
+
+
+def _client(timeout: float = 20) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=timeout, transport=transport)
+
+
+# ---------------------------------------------------------------- WAHA
+
+
+async def _waha(cfg: Config, method: str, path: str, body: Any = None, raw: bool = False) -> Any:
+    headers = {"X-Api-Key": cfg.api_key} if cfg.api_key else {}
+    async with _client() as c:
+        r = await c.request(method, cfg.base_url.rstrip("/") + path, json=body, headers=headers)
+    if r.status_code >= 400:
+        detail = r.text[:200]
+        raise WhatsAppError(f"WAHA answered {r.status_code}: {detail}", r.status_code)
+    if raw:
+        return r
+    return r.json() if r.content and "json" in r.headers.get("content-type", "") else None
+
+
+async def waha_status(cfg: Config) -> dict[str, Any]:
+    """{"status": STOPPED|STARTING|SCAN_QR_CODE|WORKING|FAILED, "me": {...}|None}."""
+    try:
+        s = await _waha(cfg, "GET", f"/api/sessions/{cfg.session}")
+    except WhatsAppError as e:
+        if e.status == 404:
+            return {"status": "MISSING", "me": None}
+        raise
+    return {"status": (s or {}).get("status", "UNKNOWN"), "me": (s or {}).get("me")}
+
+
+RECOVER_WAIT, RECOVER_STEP = 14.0, 2.0  # seconds a restart may take to settle (tests: 0)
+
+
+async def waha_restart(cfg: Config) -> None:
+    await _waha(cfg, "POST", f"/api/sessions/{cfg.session}/restart")
+
+
+async def _settled(cfg: Config) -> dict[str, Any]:
+    """The status once the session stops STARTING (or the wait is over)."""
+    waited = 0.0
+    st = await waha_status(cfg)
+    while st["status"] == "STARTING" and waited < RECOVER_WAIT:
+        await asyncio.sleep(RECOVER_STEP)
+        waited += RECOVER_STEP
+        st = await waha_status(cfg)
+    return st
+
+
+async def waha_recover(cfg: Config, webhook_url: str) -> dict[str, Any]:
+    """P115 (18-19 Nov 2026, the office number logged out by WhatsApp, "device_removed"): a
+    FAILED NOWEB session never comes back by itself ("do not reconnect"), and starting it again
+    reuses its dead login ("Connection Failure"). Restart once (a network drop comes back); if
+    it fails again the login is dead: log out (drops it) and start fresh, which shows a new QR
+    for the office phone. `rescan` says the phone has to scan again."""
+    with contextlib.suppress(WhatsAppError):
+        await waha_restart(cfg)
+    st = await _settled(cfg)
+    if st["status"] != "FAILED":
+        return {**st, "rescan": False}
+    with contextlib.suppress(WhatsAppError):
+        await waha_logout(cfg)
+    await waha_start(cfg, webhook_url, recover=False)
+    return {**await _settled(cfg), "rescan": True}
+
+
+async def waha_start(cfg: Config, webhook_url: str, recover: bool = True) -> dict[str, Any]:
+    """Create (or update) the session with our webhook, and start it. P115: a FAILED session is
+    recovered (waha_recover) instead of being started again on its dead login."""
+    if recover:
+        try:
+            now = await waha_status(cfg)
+        except WhatsAppError:
+            now = {"status": "UNKNOWN"}
+        if now["status"] == "FAILED":
+            return await waha_recover(cfg, webhook_url)
+    config = {
+        "webhooks": [
+            {
+                "url": webhook_url,
+                "events": WAHA_EVENTS,
+                "hmac": {"key": cfg.webhook_secret},
+            }
+        ],
+        # My Agentic: WAHA keeps the chats and messages, so the WhatsApp page lists them.
+        **STORE,
+    }
+    try:
+        await _waha(
+            cfg, "POST", "/api/sessions", {"name": cfg.session, "start": True, "config": config}
+        )
+    except WhatsAppError as e:
+        if e.status not in (409, 422):  # it exists: update and start it
+            raise
+        await _waha(
+            cfg, "PUT", f"/api/sessions/{cfg.session}", {"name": cfg.session, "config": config}
+        )
+        try:
+            await _waha(cfg, "POST", f"/api/sessions/{cfg.session}/start")
+        except WhatsAppError as e2:
+            if e2.status not in (409, 422):  # already started
+                raise
+    return await waha_status(cfg)
+
+
+async def waha_ensure_webhook(cfg: Config, webhook_url: str) -> bool:
+    """Bring an existing session's webhook up to date (url and events). True if changed."""
+    try:
+        s = await _waha(cfg, "GET", f"/api/sessions/{cfg.session}") or {}
+    except WhatsAppError:
+        return False
+    hooks = ((s.get("config") or {}).get("webhooks")) or []
+    ok = any(
+        h.get("url") == webhook_url and set(h.get("events") or []) >= set(WAHA_EVENTS)
+        for h in hooks
+    )
+    store_on = (((s.get("config") or {}).get("noweb") or {}).get("store") or {}).get("enabled")
+    if ok and store_on:
+        return False
+    config = {
+        **(s.get("config") or {}),
+        **STORE,
+        "webhooks": [
+            {"url": webhook_url, "events": WAHA_EVENTS, "hmac": {"key": cfg.webhook_secret}}
+        ],
+    }
+    await _waha(cfg, "PUT", f"/api/sessions/{cfg.session}", {"name": cfg.session, "config": config})
+    return True
+
+
+async def waha_qr(cfg: Config) -> str | None:
+    """The login QR as a data: URL, while the session waits to be scanned."""
+    r = await _waha(cfg, "GET", f"/api/{cfg.session}/auth/qr?format=image", raw=True)
+    ctype = r.headers.get("content-type", "")
+    if "json" in ctype:  # some versions answer {"mimetype","data"}
+        data = r.json()
+        if data.get("data"):
+            return f"data:{data.get('mimetype', 'image/png')};base64,{data['data']}"
+        return None
+    if ctype.startswith("image/"):
+        return f"data:{ctype};base64,{base64.b64encode(r.content).decode()}"
+    return None
+
+
+async def waha_logout(cfg: Config) -> None:
+    await _waha(cfg, "POST", f"/api/sessions/{cfg.session}/logout")
+
+
+def waha_chat_id(to: str) -> str:
+    return to if "@" in to else f"{digits(to)}@c.us"
+
+
+# ---------------------------------------------------------------- Meta Cloud API
+
+
+async def _meta(cfg: Config, body: dict[str, Any]) -> dict[str, Any]:
+    async with _client() as c:
+        r = await c.post(
+            f"{GRAPH}/{cfg.phone_number_id}/messages",
+            json=body,
+            headers={"Authorization": f"Bearer {cfg.token}"},
+        )
+    data = r.json() if r.content else {}
+    if r.status_code >= 400:
+        err = (data or {}).get("error", {})
+        raise WhatsAppError(
+            f"Meta answered {r.status_code}: {err.get('message', r.text[:200])}",
+            r.status_code,
+            err.get("code"),
+        )
+    return data
+
+
+async def meta_check(cfg: Config) -> dict[str, Any]:
+    async with _client() as c:
+        r = await c.get(
+            f"{GRAPH}/{cfg.phone_number_id}",
+            params={"fields": "display_phone_number,verified_name"},
+            headers={"Authorization": f"Bearer {cfg.token}"},
+        )
+    if r.status_code >= 400:
+        raise WhatsAppError(f"Meta answered {r.status_code}: {r.text[:200]}", r.status_code)
+    return r.json()
+
+
+# ---------------------------------------------------------------- both
+
+
+async def send_text(cfg: Config, to: str, text: str) -> str:
+    """Send a text; returns the provider's message id."""
+    text = text[:4000]
+    if cfg.provider == "meta":
+        body = {
+            "messaging_product": "whatsapp",
+            "to": digits(to),
+            "type": "text",
+            "text": {"body": text, "preview_url": False},
+        }
+        try:
+            data = await _meta(cfg, body)
+        except WhatsAppError as e:
+            # 131047: outside the 24-hour window; only an approved template may start a chat.
+            if e.code != 131047 or not cfg.template:
+                raise
+            data = await _meta(
+                cfg,
+                {
+                    "messaging_product": "whatsapp",
+                    "to": digits(to),
+                    "type": "template",
+                    "template": {
+                        "name": cfg.template,
+                        "language": {"code": cfg.template_lang or "en"},
+                        "components": [
+                            {"type": "body", "parameters": [{"type": "text", "text": text[:1000]}]}
+                        ],
+                    },
+                },
+            )
+        return str(((data.get("messages") or [{}])[0]).get("id", ""))
+    data = await _waha(
+        cfg,
+        "POST",
+        "/api/sendText",
+        {"session": cfg.session, "chatId": waha_chat_id(to), "text": text + MARK},
+    )
+    mid = (data or {}).get("id", "")
+    return str(mid.get("_serialized", "") if isinstance(mid, dict) else mid)  # WAHA: object or str
+
+
+def verify_waha(cfg: Config, body: bytes, signature: str | None) -> bool:
+    if not cfg.webhook_secret:
+        return False
+    want = hmac.new(cfg.webhook_secret.encode(), body, hashlib.sha512).hexdigest()
+    return bool(signature) and hmac.compare_digest(want, signature or "")
+
+
+def verify_meta(cfg: Config, body: bytes, signature: str | None) -> bool:
+    if not cfg.app_secret or not signature or not signature.startswith("sha256="):
+        return False
+    want = hmac.new(cfg.app_secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, signature.removeprefix("sha256="))
+
+
+@dataclass
+class Audio:
+    """A voice note (P18). WAHA: the file's path on the WAHA server (always fetched from the
+    channel's own WAHA address, so the API key never goes anywhere else). Meta: a media id."""
+
+    ref: str
+    mime: str
+    seconds: float | None = None
+
+
+@dataclass
+class Media:
+    """P43: a photo or document (a receipt, usually). `ref` as for Audio."""
+
+    ref: str
+    mime: str
+    name: str = ""
+
+
+@dataclass
+class Inbound:
+    message_id: str
+    sender: str  # the chat to answer: 60123456789@c.us (WAHA) or 60123456789 (Meta)
+    name: str
+    text: str  # with a photo or document: its caption
+    audio: Audio | None = None
+    file: Media | None = None
+    # My Agentic: a group message that mentions (or replies to) the connected number. `chat`
+    # is where the answer goes (the group); `sender` stays the person who wrote it.
+    chat: str = ""
+    group: bool = False
+    addressed: bool = False
+    alt_sender: str = ""  # the sender's phone id when WhatsApp gave a privacy id (@lid)
+
+
+def _same_number(a: str, b: str) -> bool:
+    da, db = digits(a.split("@")[0]), digits(b.split("@")[0])
+    return bool(da) and da == db
+
+
+def _context(p: dict[str, Any]) -> dict[str, Any]:
+    """The raw message's contextInfo (mentions, the quoted message), any message type."""
+    msg = ((p.get("_data") or {}).get("message")) or {}
+    for v in msg.values():
+        if isinstance(v, dict) and isinstance(v.get("contextInfo"), dict):
+            return v["contextInfo"]
+    return {}
+
+
+def addressed_to_me(p: dict[str, Any], mine: list[str], text: str) -> bool:
+    """Does this group message mention the connected number, or reply to one of its own
+    messages? `mine`: the number's ids (phone id and privacy id)."""
+    if not mine:
+        return False
+    ctx = _context(p)
+    mentioned = [
+        str(x) for x in [*(p.get("mentionedIds") or []), *(ctx.get("mentionedJid") or [])] if x
+    ]
+    if any(_same_number(x, m) for x in mentioned for m in mine):
+        return True
+    reply = p.get("replyTo") or {}
+    quoted_by = str(reply.get("participant") or ctx.get("participant") or "")
+    if quoted_by and any(_same_number(quoted_by, m) for m in mine):
+        return True
+    return any(d and re.search(rf"@{d}\b", text) for d in (digits(m.split("@")[0]) for m in mine))
+
+
+def _parse_group(
+    p: dict[str, Any], me: dict[str, Any], text: str, file: Any, audio: Any
+) -> list[Inbound]:
+    if p.get("fromMe"):
+        return []  # the number itself (or its owner on the phone) writing in the group
+    key = (p.get("_data") or {}).get("key") or {}
+    sender = str(p.get("participant") or key.get("participant") or p.get("author") or "")
+    alt = str(key.get("participantPn") or key.get("participantAlt") or "")
+    mine = [str(x) for x in (me.get("id"), me.get("lid")) if x]
+    if not sender or not addressed_to_me(p, mine, text):
+        return []
+    name = str(((p.get("_data") or {}).get("pushName")) or p.get("notifyName") or "")
+    return [
+        Inbound(
+            str(p.get("id") or ""),
+            sender,
+            name,
+            text,
+            audio,
+            file,
+            chat=str(p.get("from") or ""),
+            group=True,
+            addressed=True,
+            alt_sender=alt,
+        )
+    ]
+
+
+def parse_waha(payload: dict[str, Any]) -> list[Inbound]:
+    """People's messages to the office number, plus the owner's own "Message yourself" chat
+    when the office number is their phone. Statuses and our own sends are skipped; a group
+    message only when it mentions (or replies to) the number (My Agentic)."""
+    if payload.get("event") not in ("message", "message.any"):
+        return []
+    p = payload.get("payload") or {}
+    text = str(p.get("body") or "").strip()
+    if MARK in text:
+        return []  # a message we sent
+    file = _waha_file(p)
+    audio = None if text or file else _waha_audio(p)
+    if not text and audio is None and file is None:
+        return []  # empty, or media other than a voice note, a photo or a PDF
+    me = payload.get("me") or {}
+    if str(p.get("from") or "").endswith("@g.us"):
+        return _parse_group(p, me, text, file, audio)
+    sender = str(p.get("from") or "")
+    if p.get("fromMe"):
+        # Sent from the office phone itself: only its chat with itself counts.
+        to = str(p.get("to") or "")
+        mine = [x for x in (me.get("id"), me.get("lid")) if x]
+        if not mine or not (to in mine or any(_same_number(to, m) for m in mine)):
+            return []
+        sender = str(me.get("id") or to)
+    if not sender or "@" not in sender or sender.endswith(("@g.us", "@broadcast", "@newsletter")):
+        return []
+    name = str(
+        ((p.get("_data") or {}).get("notifyName"))
+        or (p.get("notifyName") or "")
+        or me.get("pushName")
+        or ""
+    )
+    return [Inbound(str(p.get("id") or ""), sender, name, text, audio, file)]
+
+
+def _seconds(*values: Any) -> float | None:
+    for v in values:
+        try:
+            if v is not None and float(v) > 0:
+                return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _waha_file(p: dict[str, Any]) -> Media | None:
+    """P43: a photo or PDF WAHA already downloaded (served under /api/files/ only)."""
+    from .receipts import wanted
+
+    m = p.get("media") or {}
+    if not p.get("hasMedia") or not isinstance(m, dict) or not m.get("url"):
+        return None
+    mime = str(m.get("mimetype") or "")
+    u = urlparse(str(m["url"]))
+    path = u.path + (f"?{u.query}" if u.query else "")
+    if not wanted(mime) or not path.startswith("/api/files/"):
+        return None
+    return Media(path, mime, str(m.get("filename") or ""))
+
+
+def _waha_audio(p: dict[str, Any]) -> Audio | None:
+    """A voice note or audio file WAHA already downloaded (hasMedia + media.url)."""
+    m = p.get("media") or {}
+    if not p.get("hasMedia") or not isinstance(m, dict) or not m.get("url"):
+        return None
+    mime = str(m.get("mimetype") or "")
+    if not mime.lower().startswith("audio/"):
+        return None
+    u = urlparse(str(m["url"]))
+    path = u.path + (f"?{u.query}" if u.query else "")
+    if not path.startswith("/api/files/"):  # WAHA serves downloaded media only there
+        return None
+    data = p.get("_data") or {}
+    audio_msg = ((data.get("message") or {}).get("audioMessage") or {}) if data else {}
+    return Audio(path, mime, _seconds(data.get("duration"), audio_msg.get("seconds")))
+
+
+def parse_meta(payload: dict[str, Any]) -> list[Inbound]:
+    out: list[Inbound] = []
+    for entry in payload.get("entry") or []:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            names = {
+                c.get("wa_id"): (c.get("profile") or {}).get("name", "")
+                for c in value.get("contacts") or []
+            }
+            for m in value.get("messages") or []:
+                sender = str(m.get("from") or "")
+                audio = file = None
+                text = str((m.get("text") or {}).get("body") or "").strip()
+                kind = m.get("type")
+                if kind == "audio" and (m.get("audio") or {}).get("id"):
+                    a = m["audio"]
+                    audio = Audio(str(a["id"]), str(a.get("mime_type") or "audio/ogg"))
+                elif kind in ("image", "document") and (m.get(kind) or {}).get("id"):
+                    from .receipts import wanted
+
+                    d = m[kind]
+                    mime = str(d.get("mime_type") or ("image/jpeg" if kind == "image" else ""))
+                    if not wanted(mime):
+                        continue
+                    file = Media(str(d["id"]), mime, str(d.get("filename") or ""))
+                    text = str(d.get("caption") or "").strip()
+                elif kind != "text":
+                    continue
+                out.append(
+                    Inbound(
+                        str(m.get("id") or ""), sender, names.get(sender, ""), text, audio, file
+                    )
+                )
+    return [m for m in out if (m.text or m.audio or m.file) and m.sender]
+
+
+# ---------------------------------------------------------------- voice notes (P18)
+
+# Meta hands out media URLs on its own CDN; the token is only ever sent to these hosts.
+META_MEDIA_HOSTS = (".fbsbx.com", ".facebook.com", ".whatsapp.net")
+
+
+async def _fetch(c: httpx.AsyncClient, url: str, headers: dict[str, str], max_bytes: int) -> bytes:
+    async with c.stream("GET", url, headers=headers) as r:
+        if r.status_code >= 400:
+            raise WhatsAppError(f"The file could not be downloaded ({r.status_code}).")
+        data = bytearray()
+        async for chunk in r.aiter_bytes():
+            data.extend(chunk)
+            if len(data) > max_bytes:
+                raise WhatsAppError("The file is too large.", 413)
+    return bytes(data)
+
+
+async def download_audio(cfg: Config, audio: Audio, max_bytes: int) -> bytes:
+    """The voice note's bytes (P18)."""
+    return await download_media(cfg, audio.ref, max_bytes)
+
+
+async def download_media(cfg: Config, ref: str, max_bytes: int) -> bytes:
+    """A voice note's, photo's or document's bytes, from WAHA (X-Api-Key) or from Meta (media
+    id -> a URL on Meta's own hosts)."""
+    async with _client(timeout=60) as c:
+        if cfg.provider == "meta":
+            auth = {"Authorization": f"Bearer {cfg.token}"}
+            r = await c.get(f"{GRAPH}/{ref}", headers=auth)
+            if r.status_code >= 400:
+                raise WhatsAppError(f"Meta answered {r.status_code} for the file.")
+            info = r.json()
+            url = str(info.get("url") or "")
+            host = (urlparse(url).hostname or "").lower()
+            if urlparse(url).scheme != "https" or not host.endswith(META_MEDIA_HOSTS):
+                raise WhatsAppError("Meta gave an unexpected address for the file.")
+            if int(info.get("file_size") or 0) > max_bytes:
+                raise WhatsAppError("The file is too large.", 413)
+            return await _fetch(c, url, auth, max_bytes)
+        headers = {"X-Api-Key": cfg.api_key} if cfg.api_key else {}
+        return await _fetch(c, cfg.base_url.rstrip("/") + ref, headers, max_bytes)
+
+
+# ---------------------------------------------------------------- My Agentic: the chats page
+
+
+def _ts(v: Any) -> str | None:
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(n / 1000 if n > 1e11 else n, UTC).isoformat()
+
+
+def _clean(text: str) -> str:
+    return (text or "").replace(MARK, "")
+
+
+def chat_row(c: dict[str, Any]) -> dict[str, Any]:
+    last = c.get("lastMessage") or {}
+    cid = str(c.get("id") or "")
+    if isinstance(c.get("id"), dict):
+        cid = str(c["id"].get("_serialized") or "")
+    raw = c.get("_chat") or {}
+    return {
+        "id": cid,
+        "name": str(c.get("name") or raw.get("name") or cid.split("@")[0]),
+        "group": cid.endswith("@g.us"),
+        "picture": c.get("picture"),
+        "unread": int(raw.get("unreadCount") or c.get("unreadCount") or 0),
+        "last": {
+            "text": _clean(str(last.get("body") or ""))[:200],
+            "from_me": bool(last.get("fromMe")),
+            "at": _ts(last.get("timestamp") or raw.get("conversationTimestamp")),
+            "media": bool(last.get("hasMedia")),
+        }
+        if last or raw
+        else None,
+    }
+
+
+def message_row(m: dict[str, Any]) -> dict[str, Any]:
+    key = (m.get("_data") or {}).get("key") or {}
+    media = m.get("media") or {}
+    reply = m.get("replyTo") or {}
+    return {
+        "id": str(m.get("id") or ""),
+        "from_me": bool(m.get("fromMe")),
+        "sender": str(m.get("participant") or key.get("participant") or m.get("from") or ""),
+        "sender_name": str(((m.get("_data") or {}).get("pushName")) or ""),
+        "text": _clean(str(m.get("body") or "")),
+        "at": _ts(m.get("timestamp")),
+        "ack": m.get("ackName") or m.get("ack"),
+        "media": {
+            "mimetype": media.get("mimetype") or "",
+            "filename": media.get("filename") or "",
+            "url": media.get("url") or "",
+        }
+        if m.get("hasMedia")
+        else None,
+        "reply_to": {
+            "id": str(reply.get("id") or ""),
+            "text": _clean(str(reply.get("body") or ""))[:200],
+        }
+        if reply
+        else None,
+        "ai": MARK in str(m.get("body") or ""),  # sent by this app (the AI or the page)
+    }
+
+
+async def waha_chats(cfg: Config, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    """The newest chats first (WAHA's chats overview; older WAHA: the plain chat list)."""
+    q = f"limit={max(1, min(limit, 100))}&offset={max(0, offset)}"
+    try:
+        rows = await _waha(cfg, "GET", f"/api/{cfg.session}/chats/overview?{q}")
+    except WhatsAppError as e:
+        if e.status not in (404, 405):
+            raise
+        rows = await _waha(
+            cfg,
+            "GET",
+            f"/api/{cfg.session}/chats?{q}&sortBy=conversationTimestamp&sortOrder=desc",
+        )
+    return [chat_row(c) for c in rows or [] if isinstance(c, dict)]
+
+
+async def waha_messages(cfg: Config, chat_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """A chat's newest messages, oldest first (for reading top to bottom)."""
+    from urllib.parse import quote
+
+    rows = await _waha(
+        cfg,
+        "GET",
+        f"/api/{cfg.session}/chats/{quote(chat_id, safe='@.')}/messages"
+        f"?limit={max(1, min(limit, 200))}&downloadMedia=false",
+    )
+    out = [message_row(m) for m in rows or [] if isinstance(m, dict)]
+    out.sort(key=lambda m: m["at"] or "")
+    return out
+
+
+async def waha_send(cfg: Config, chat_id: str, text: str, reply_to: str = "") -> str:
+    """Send a text into a chat (a person or a group), quoting a message when given."""
+    body: dict[str, Any] = {
+        "session": cfg.session,
+        "chatId": waha_chat_id(chat_id),
+        "text": text[:4000] + MARK,
+    }
+    if reply_to:
+        body["reply_to"] = reply_to
+    data = await _waha(cfg, "POST", "/api/sendText", body)
+    mid = (data or {}).get("id", "")
+    return str(mid.get("_serialized", "") if isinstance(mid, dict) else mid)
+
+
+async def waha_seen(cfg: Config, chat_id: str) -> None:
+    await _waha(cfg, "POST", "/api/sendSeen", {"session": cfg.session, "chatId": chat_id})
+
+
+async def waha_phone_of(cfg: Config, lid: str) -> str:
+    """A privacy id (123@lid) as its phone id (601...@c.us), when WAHA knows it; else ""."""
+    from urllib.parse import quote
+
+    if not lid.endswith("@lid"):
+        return ""
+    try:
+        data = await _waha(cfg, "GET", f"/api/{cfg.session}/lids/{quote(lid, safe='')}")
+    except WhatsAppError:
+        return ""
+    return str((data or {}).get("pn") or "")

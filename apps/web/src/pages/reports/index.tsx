@@ -1,0 +1,258 @@
+import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, ArrowsDownUpIcon, ClipboardTextIcon, DownloadSimpleIcon, KanbanIcon, MagnifyingGlassIcon, SparkleIcon, TableIcon } from "@phosphor-icons/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+
+import { AgentAvatar } from "@/components/agent-avatar";
+import { Markdown } from "@/components/markdown";
+import { EmptyState, IconTile, Page, PageHeader } from "@/components/page";
+import { Button } from "@/components/ui/button";
+import { Meta } from "@/components/ui/card";
+import { DataTable, TableFilter, useServerTable, useTableState, type Column } from "@/components/ui/data-table";
+import { Pill } from "@/components/ui/pill";
+import { Skeleton } from "@/components/ui/skeleton";
+import { locale, useT } from "@/i18n";
+import { errorMessage } from "@/lib/api";
+import { onLiveEvent } from "@/lib/live";
+import { officeKeys, reportQuery, type Report, type ReportTable } from "@/lib/office-data";
+import { branchesQuery } from "@/lib/queries";
+import { everyRow } from "@/lib/table-export";
+import { cn, timeAgo } from "@/lib/utils";
+import { agentsQuery } from "@/lib/work";
+
+/** One table of a report: sortable, filterable, a CSV download; cards on a phone. */
+export function CsvTable({ reportId, table, n }: { reportId: string; table: ReportTable; n: number }) {
+  const t = useT();
+  const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
+  const [q, setQ] = useState("");
+  const numeric = table.columns.map((_, i) => table.rows.length > 0 && table.rows.every((r) => typeof r[i] === "number" || r[i] === ""));
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    let out = needle ? table.rows.filter((r) => r.some((c) => String(c).toLowerCase().includes(needle))) : table.rows;
+    if (sort) {
+      out = [...out].sort((a, b) => {
+        const x = a[sort.col], y = b[sort.col];
+        const c = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? ""), locale(), { numeric: true });
+        return sort.desc ? -c : c;
+      });
+    }
+    return out;
+  }, [table.rows, sort, q]);
+  return (
+    <section aria-label={table.title || t("Table {n}", { n: n + 1 })} className="min-w-0 overflow-hidden rounded-[var(--radius-md)] border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-2/50 px-3 py-2.5 sm:px-4">
+        <h3 className="flex min-w-0 flex-1 basis-48 items-center gap-2 text-[13.5px] font-semibold">
+          <TableIcon size={15} weight="duotone" className="shrink-0 text-muted" />
+          <span className="min-w-0 break-words">{table.title || t("Table {n}", { n: n + 1 })} <span className="font-normal whitespace-nowrap text-muted">· {table.rows.length === 1 ? t("1 row") : t("{n} rows", { n: table.rows.length })}</span></span>
+        </h3>
+        {table.rows.length > 8 ? (
+          <label className="relative max-sm:flex-1">
+            <span className="sr-only">{t("Filter rows")}</span>
+            <MagnifyingGlassIcon size={13} className="absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Filter rows")} className="h-8 w-full rounded-sm border border-border bg-surface pr-2 pl-7 text-[12.5px] focus-visible:border-accent focus-visible:outline-none sm:w-40" />
+          </label>
+        ) : null}
+        <Button size="sm" variant="outline" asChild>
+          <a href={`/api/reports/${reportId}/table/${n}.csv`} download><DownloadSimpleIcon size={14} /> CSV</a>
+        </Button>
+      </div>
+      {/* P92: on a phone each row is a card (no sideways scrolling); the table from md up */}
+      <ul data-testid="report-cards" className="max-h-[32rem] divide-y divide-border overflow-y-auto md:hidden">
+        {rows.map((r, ri) => (
+          <li key={ri} className="px-3 py-2.5">
+            <dl className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-3 gap-y-1 text-[14px]">
+              {table.columns.map((c, ci) => (
+                <div key={ci} className="contents">
+                  <dt className="text-[13px] break-words text-muted">{c}</dt>
+                  <dd className={cn("min-w-0 break-words", numeric[ci] && "font-mono tabular")}>
+                    {typeof r[ci] === "number" ? Number(r[ci]).toLocaleString(locale()) : String(r[ci] ?? "")}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+        {!rows.length ? <li className="px-3 py-4 text-center text-[14px] text-muted">{t("No rows match.")}</li> : null}
+      </ul>
+      <div className="max-h-[32rem] overflow-auto max-md:hidden">
+        <table className="w-full text-[12.5px]">
+          <thead className="sticky top-0 z-10 bg-surface text-left text-muted shadow-[0_1px_0_var(--color-border)]">
+            <tr>
+              {table.columns.map((c, i) => (
+                <th key={i} scope="col" className={cn("px-3 py-2 font-medium whitespace-nowrap", numeric[i] && "text-right")}
+                  aria-sort={sort?.col === i ? (sort.desc ? "descending" : "ascending") : "none"}>
+                  <button className={cn("group inline-flex items-center gap-1 py-0.5 hover:text-fg", sort?.col === i && "text-fg")} onClick={() => setSort((s) => ({ col: i, desc: s?.col === i ? !s.desc : !!numeric[i] }))}>
+                    {c}{sort?.col === i ? (sort.desc ? <ArrowDownIcon size={11} /> : <ArrowUpIcon size={11} />) : <ArrowsDownUpIcon size={11} className="opacity-0 transition-opacity group-hover:opacity-60" />}
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((r, ri) => (
+              <tr key={ri} className="align-top hover:bg-surface-2/40">
+                {table.columns.map((_, ci) => (
+                  <td key={ci} className={cn("px-3 py-2", numeric[ci] ? "text-right font-mono whitespace-nowrap tabular" : "max-w-[28rem] min-w-[8rem] break-words")}>
+                    {typeof r[ci] === "number" ? Number(r[ci]).toLocaleString(locale()) : String(r[ci] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {!rows.length ? <tr><td colSpan={table.columns.length} className="px-3 py-4 text-center text-muted">{t("No rows match.")}</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Reader({ id }: { id: string }) {
+  const t = useT();
+  const { data: r, isLoading, error } = useQuery(reportQuery(id));
+  if (isLoading) {
+    return (
+      <div className="grid content-start gap-4" aria-hidden>
+        <Skeleton className="h-7 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-24 rounded-[var(--radius-md)]" />
+        <Skeleton className="h-64 rounded-[var(--radius-md)]" />
+      </div>
+    );
+  }
+  if (error || !r) return <p role="alert" className="text-danger">{errorMessage(error)}</p>;
+  return (
+    <article className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-4">
+      <header className="grid min-w-0 gap-2.5">
+        <h2 className="text-[19px] leading-snug font-semibold tracking-tight break-words sm:text-[21px]">{r.title}</h2>
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-muted">
+          <Meta
+            items={[
+              r.agent_name ? <span className="inline-flex items-center gap-1.5 text-fg"><AgentAvatar name={r.agent_name} color={r.agent_color ?? "#888"} size="xs" /> {r.agent_name}</span> : null,
+              r.branch_name,
+              <time dateTime={r.created_at}>{timeAgo(r.created_at)}</time>,
+              r.task_id ? <Link to="/tasks" search={{ task: r.task_id }} className="inline-flex min-w-0 items-center gap-1 text-accent hover:underline"><KanbanIcon size={13} className="shrink-0" /><span className="truncate">{r.task_title ?? t("the task")}</span></Link> : null,
+            ]}
+          />
+        </p>
+        {r.labels.length ? <div className="flex flex-wrap gap-1.5">{r.labels.map((l) => <Pill key={l}>{l}</Pill>)}</div> : null}
+      </header>
+      {r.summary ? (
+        <section aria-label={t("Summary")} className="flex min-w-0 gap-3 rounded-[var(--radius-md)] border border-accent/25 bg-accent-soft/50 p-4">
+          <IconTile icon={SparkleIcon} size="sm" className="max-sm:hidden" />
+          <div className="min-w-0">
+            <p className="text-[11.5px] font-semibold tracking-[0.06em] text-accent uppercase">{t("Summary")}</p>
+            <p className="mt-1 text-[14px] leading-relaxed break-words">{r.summary}</p>
+          </div>
+        </section>
+      ) : null}
+      {(r.tables ?? []).map((tb, n) => <CsvTable key={n} reportId={r.id} table={tb} n={n} />)}
+      {r.body ? <Markdown className="rounded-[var(--radius-md)] border border-border bg-surface px-4 py-4 sm:px-5">{r.body}</Markdown> : null}
+    </article>
+  );
+}
+
+export function ReportsPage() {
+  const t = useT();
+  const qc = useQueryClient();
+  const search = useSearch({ strict: false }) as { r?: string };
+  const navigate = useNavigate();
+  const { data: branches = [] } = useQuery(branchesQuery);
+  const { data: agents = [] } = useQuery(agentsQuery);
+  // P107: a data table. The server searches (title, summary, agent, label), filters by company
+  // and agent, sorts and sends one numbered page; the address keeps where you were.
+  const control = useTableState({ size: 25 }, { filters: ["branch_id", "agent_id"] });
+  const table = useServerTable<Report>(officeKeys.reports, "/api/reports", control.state);
+  useEffect(() => onLiveEvent((ev) => {
+    if (ev.type === "report.created") qc.invalidateQueries({ queryKey: officeKeys.reports });
+  }), [qc]);
+  // Opening a report keeps the table's place in the address, so "All reports" returns to it.
+  const open = (id?: string) => navigate({
+    to: "/reports",
+    search: ((prev: Record<string, unknown>) => {
+      const next = { ...prev };
+      if (id) next.r = id;
+      else delete next.r;
+      return next;
+    }) as never,
+    replace: true,
+  });
+
+  const columns: Column<Report>[] = [
+    {
+      id: "title", header: t("Report"), sortable: true, card: "title", exportValue: (r) => r.title,
+      cell: (r) => (
+        <span className="grid min-w-0 gap-0.5">
+          <span className="line-clamp-2 text-[13.5px] leading-snug font-medium break-words">{r.title}</span>
+          {r.summary ? <span className="line-clamp-2 text-[12.5px] font-normal text-muted">{r.summary}</span> : null}
+          {r.labels.length ? (
+            <span className="mt-1 flex flex-wrap gap-1">{r.labels.slice(0, 3).map((l) => <Pill key={l}>{l}</Pill>)}</span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: "agent", header: t("Agent"), exportValue: (r) => r.agent_name ?? "",
+      cell: (r) => r.agent_name ? (
+        <span className="inline-flex min-w-0 items-center gap-1.5"><AgentAvatar name={r.agent_name} color={r.agent_color ?? "#888"} size="xs" /><span className="break-words">{r.agent_name}</span></span>
+      ) : <span className="text-muted">-</span>,
+    },
+    { id: "summary", header: t("Summary"), exportOnly: true, cell: () => null, exportValue: (r) => r.summary ?? "" },
+    { id: "company", header: t("Company"), hideBelow: "lg", exportValue: (r) => r.branch_name ?? t("Office"), cell: (r) => r.branch_name ?? <span className="text-muted">{t("Office")}</span> },
+    {
+      id: "rows", header: t("Rows"), kind: "number", align: "right", hideBelow: "xl", exportValue: (r) => r.row_count ?? null,
+      cell: (r) => r.row_count ? (
+        <span className="inline-flex items-center gap-1"><TableIcon size={12} className="text-muted" />{r.row_count.toLocaleString(locale())}</span>
+      ) : <span className="text-muted">-</span>,
+    },
+    {
+      id: "created", header: t("Published"), sortable: true, kind: "date", className: "whitespace-nowrap", exportValue: (r) => r.created_at,
+      cell: (r) => <time dateTime={r.created_at} className="text-muted" title={new Date(r.created_at).toLocaleString(locale())}>{timeAgo(r.created_at)}</time>,
+    },
+  ];
+
+  return (
+    <Page className="max-w-7xl">
+      <PageHeader title={t("Reports")} description={t("What agents wrote up for you: a summary first, then tables you can sort, filter and download as CSV.")} />
+      {search.r ? (
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-3">
+          <Button variant="ghost" size="sm" onClick={() => open()} className="-ml-2 w-fit"><ArrowLeftIcon size={14} /> {t("All reports")}</Button>
+          <Reader key={search.r} id={search.r} />
+        </div>
+      ) : (
+        <div data-guide="reports.list" className="min-w-0">
+          <DataTable<Report>
+            label={t("Reports")}
+            columns={columns}
+            rows={table.rows}
+            total={table.total}
+            mode="server"
+            rowId={(r) => r.id}
+            rowLabel={(r) => r.title}
+            control={control}
+            loading={table.loading}
+            fetching={table.fetching}
+            error={table.error}
+            onRetry={table.refetch}
+            onOpen={(r) => open(r.id)}
+            searchPlaceholder={t("Search reports")}
+            exportName={t("reports")}
+            exportRows={() => everyRow<Report>("/api/reports", control.state)}
+            filters={
+              <>
+                {branches.length > 1 ? (
+                  <TableFilter control={control} id="branch_id" label={t("Company")} allLabel={t("All companies")}
+                    options={branches.map((b) => ({ value: b.id, label: b.name }))} />
+                ) : null}
+                {agents.length ? (
+                  <TableFilter control={control} id="agent_id" label={t("Agent")} allLabel={t("Any agent")}
+                    options={agents.filter((a) => !a.clone_of).map((a) => ({ value: a.id, label: a.name }))} />
+                ) : null}
+              </>
+            }
+            empty={<EmptyState icon={ClipboardTextIcon} title={t("No reports yet")} body={t("Ask an agent for a report (for example, a summary of an inbox) and it publishes one here.")} />}
+          />
+        </div>
+      )}
+    </Page>
+  );
+}

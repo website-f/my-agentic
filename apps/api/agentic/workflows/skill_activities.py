@@ -1,0 +1,114 @@
+"""Activities for skills: reflecting on finished work, and running evals."""
+
+import logging
+
+from sqlalchemy import select
+from temporalio import activity
+
+from ..agents import runtime, site_playbook
+from ..core.db import SessionLocal
+from ..models import Skill, SkillEvalCase, SkillProposal, Task, Workspace
+from ..services import events
+from ..skills import autopilot, evals, optimize, reflect, routines
+from ..skills.store import SkillError
+
+log = logging.getLogger("agentic.worker.skills")
+
+
+@activity.defn
+async def skill_reflect(task_id: str) -> str | None:
+    # P36: first, can the office repeat this job without the paid model next time?
+    async with SessionLocal() as db:
+        try:
+            await routines.learn(db, task_id)
+        except Exception:  # noqa: BLE001 - a routine is extra; skills are learned regardless
+            activity.logger.warning("routine learning failed for %s", task_id, exc_info=True)
+    # P97: and the way it went on each web site, for the site's playbook.
+    async with SessionLocal() as db:
+        try:
+            await site_playbook.learn(db, task_id)
+        except Exception:  # noqa: BLE001 - a playbook is extra
+            activity.logger.warning("playbook learning failed for %s", task_id, exc_info=True)
+    async with SessionLocal() as db:
+        p = await reflect.reflect_on_task(db, task_id)
+        if p is None:
+            return None
+        task = await db.get(Task, task_id)
+        if task is not None:
+            what = "an update to the skill" if p.kind == "patch" else "a new skill"
+            done = (
+                f"learned {what} {p.name} and switched it on (it passed its tests)"
+                if p.status == "approved"
+                else f"proposed {what} {p.name} for review"
+            )
+            await runtime.task_event(
+                db,
+                task,
+                "skill",
+                f"agent:{task.assignee_agent_id}",
+                done,
+                {"proposal_id": p.id, "name": p.name, "kind": p.kind, "status": p.status},
+            )
+        return p.id
+
+
+@activity.defn
+async def skill_reflect_chat(message_id: int) -> str | None:
+    async with SessionLocal() as db:
+        p = await reflect.reflect_on_chat(db, message_id)
+        return p.id if p else None
+
+
+@activity.defn
+async def skill_eval(kind: str, target_id: str) -> dict:
+    """kind = skill (run its test cases) | proposal (old vs new) | optimize (P18)."""
+    async with SessionLocal() as db:
+        if kind == "optimize":
+            sk = await db.get(Skill, target_id)
+            ws = await db.get(Workspace, sk.workspace_id) if sk else None
+            if sk is None or ws is None:
+                return {}
+            try:
+                out = await optimize.optimize(db, ws, sk)
+            except SkillError as e:
+                await events.publish(
+                    sk.workspace_id, "skill.updated", {"skill_id": sk.id, "optimize": str(e)}
+                )
+                return {"error": str(e)}
+            await events.publish(
+                sk.workspace_id,
+                "skill.proposal",
+                {"proposal_id": out.proposal_id, "skill_id": sk.id, "optimize": out.note},
+            )
+            return {
+                "baseline": out.baseline,
+                "best": out.best,
+                "proposal_id": out.proposal_id,
+                "status": out.status,
+                "note": out.note,
+            }
+        if kind == "proposal":
+            p = await db.get(SkillProposal, target_id)
+            if p is None:
+                return {}
+            result = await reflect.evaluate(db, p) or {}
+            ws = await db.get(Workspace, p.workspace_id)
+            if ws is not None:  # P17: proven drafts go live (per the workspace's mode)
+                await autopilot.consider(db, ws, p)
+            await events.publish(p.workspace_id, "skill.proposal", {"proposal_id": p.id})
+            return {"passed": result.get("new", {}).get("passed")}
+        s = await db.get(Skill, target_id)
+        if s is None:
+            return {}
+        cases = [
+            {"title": c.title, "input": c.input, "checks": c.checks}
+            for c in (
+                await db.scalars(select(SkillEvalCase).where(SkillEvalCase.skill_id == s.id))
+            ).all()
+        ]
+        result = await evals.run_suite(db, s.workspace_id, s.body, cases, s.agent_ids)
+        result["version"] = s.version
+        s.last_eval = result
+        await db.commit()
+        await events.publish(s.workspace_id, "skill.updated", {"skill_id": s.id})
+        return {"passed": result.get("passed"), "total": result.get("total")}

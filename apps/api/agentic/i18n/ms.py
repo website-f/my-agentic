@@ -1,0 +1,2066 @@
+# ruff: noqa: E501
+"""Bahasa Melayu for what the server says: English -> Malay.
+
+Style: apps/web/src/i18n/README.md (natural Malaysian office Malay, short, "anda", no
+"sila / adalah / dengan ini" padding) and the fixed terms in apps/web/src/i18n/ms/glossary.ts
+(ejen, tugasan, kelulusan, kemahiran, pelan tugas, kembar AI, pembantu, ...). Where the web
+app already says the same thing, the words here are the same, so the bot and the UI match.
+
+A key may carry a "|tag" to keep two meanings of one English word apart; English shows the
+part before "|". `{vars}` must stay exactly as in the English (tests/test_i18n.py checks).
+"""
+
+MS: dict[str, str] = {
+    # ------------------------------------------------------------ sign-in and access (api/deps, auth)
+    "Sign in to continue.": "Log masuk untuk teruskan.",
+    "Your session ended. Sign in again.": "Sesi anda sudah tamat. Log masuk semula.",
+    "This account no longer has access to the workspace.": (
+        "Akaun ini tiada akses lagi ke ruang kerja ini."
+    ),
+    "Set a new password before continuing.": "Tetapkan kata laluan baharu sebelum teruskan.",
+    "Your role ({role}) cannot do this.": "Peranan anda ({role}) tidak boleh buat ini.",
+    # P96: data tables (api/table.py)
+    "This list cannot be sorted by {column}.": "Senarai ini tidak boleh disusun ikut {column}.",
+    # ------------------------------------------------------------ P81 start fresh for go-live
+    "That workspace was not found.": "Ruang kerja itu tidak dijumpai.",
+    "One of the companies picked is not in this office.": (
+        "Salah satu syarikat yang dipilih tiada dalam pejabat ini."
+    ),
+    "The company that takes in the AI workers and files must be one you keep.": (
+        "Syarikat yang menerima pekerja AI dan fail mestilah syarikat yang anda kekalkan."
+    ),
+    "Pick the company that takes in the AI workers and files of the companies you remove.": (
+        "Pilih syarikat yang menerima pekerja AI dan fail daripada syarikat yang anda buang."
+    ),
+    "This office has no owner, so nobody would be left.": (
+        "Pejabat ini tiada pemilik, jadi tiada sesiapa akan tinggal."
+    ),
+    # ------------------------------------------------------------ P80 SharePoint folders in the Library
+    "Paste the link to a SharePoint or OneDrive folder.": (
+        "Tampal pautan folder SharePoint atau OneDrive."
+    ),
+    "That does not look like one link. Paste just the folder's link.": (
+        "Itu tidak kelihatan seperti satu pautan. Tampal pautan folder itu sahaja."
+    ),
+    "Only https links to SharePoint or OneDrive can be connected.": (
+        "Hanya pautan https ke SharePoint atau OneDrive boleh disambungkan."
+    ),
+    "Only SharePoint (sharepoint.com) and OneDrive links can be connected. Copy the link from SharePoint or OneDrive with Share or Copy link.": (  # noqa: E501
+        "Hanya pautan SharePoint (sharepoint.com) dan OneDrive boleh disambungkan. Salin pautan "
+        "dari SharePoint atau OneDrive dengan Share atau Copy link."
+    ),
+    "Microsoft did not say which folder that link opens.": (
+        "Microsoft tidak memberitahu folder mana yang dibuka oleh pautan itu."
+    ),
+    "That address is not inside a SharePoint document library.": (
+        "Alamat itu bukan di dalam pustaka dokumen SharePoint."
+    ),
+    "Refused a download address that is not Microsoft's.": (
+        "Alamat muat turun yang bukan milik Microsoft ditolak."
+    ),
+    "Microsoft answered {status} for the file.": "Microsoft menjawab {status} untuk fail itu.",
+    "The Microsoft 365 connection that linked this folder is gone. Connect it again.": (
+        "Sambungan Microsoft 365 yang memautkan folder ini sudah tiada. Sambungkannya semula."
+    ),
+    "{name} needs to reconnect Microsoft 365 to allow SharePoint, then sync again.": (
+        "{name} perlu menyambung semula Microsoft 365 untuk membenarkan SharePoint, kemudian "
+        "segerakkan semula."
+    ),
+    "SharePoint says this folder is gone, or {name} can no longer open it. Check the folder, or disconnect it.": (  # noqa: E501
+        "SharePoint kata folder ini sudah tiada, atau {name} tidak boleh membukanya lagi. Semak "
+        "folder itu, atau putuskan sambungannya."
+    ),
+    "None of these SharePoint files has readable text yet. Sync the folder first.": (
+        "Belum ada teks yang boleh dibaca dalam fail SharePoint ini. Segerakkan folder itu dahulu."
+    ),
+    "Only an owner, an admin or the company's manager can connect SharePoint folders.": (
+        "Hanya pemilik, pentadbir atau pengurus syarikat boleh menyambung folder SharePoint."
+    ),
+    "That SharePoint folder is not here.": "Folder SharePoint itu tiada di sini.",
+    "SharePoint reading was not allowed. Your Microsoft 365 admin must grant Files.Read.All and Sites.Read.All to this app (Azure portal > App registrations > API permissions > Grant admin consent), then try again. Your sign-in and mail keep working.": (  # noqa: E501
+        "Bacaan SharePoint tidak dibenarkan. Pentadbir Microsoft 365 anda perlu memberi "
+        "Files.Read.All dan Sites.Read.All kepada aplikasi ini (portal Azure > App registrations "
+        "> API permissions > Grant admin consent), kemudian cuba lagi. Log masuk dan e-mel anda "
+        "tetap berfungsi."
+    ),
+    "Connect your Microsoft 365 account first. The folder is opened with your own sign-in.": (
+        "Sambungkan akaun Microsoft 365 anda dahulu. Folder itu dibuka dengan log masuk anda "
+        "sendiri."
+    ),
+    "Reconnect Microsoft 365 once to allow SharePoint, then paste the link again.": (
+        "Sambung semula Microsoft 365 sekali untuk membenarkan SharePoint, kemudian tampal "
+        "pautan itu semula."
+    ),
+    "Your Microsoft account cannot open that link. Check that it was shared with you, and that you connected the same Microsoft account.": (  # noqa: E501
+        "Akaun Microsoft anda tidak boleh membuka pautan itu. Semak sama ada ia dikongsi dengan "
+        "anda, dan anda menyambung akaun Microsoft yang sama."
+    ),
+    "Microsoft could not find what that link opens. Copy the link again from SharePoint or OneDrive.": (  # noqa: E501
+        "Microsoft tidak menjumpai apa yang dibuka oleh pautan itu. Salin pautan itu semula dari "
+        "SharePoint atau OneDrive."
+    ),
+    "Microsoft did not answer as expected: {why}": (
+        "Microsoft tidak menjawab seperti yang dijangka: {why}"
+    ),
+    "That link opens a file the Library cannot read. Link a folder, or a Word, Excel, PowerPoint, PDF, text or CSV file.": (  # noqa: E501
+        "Pautan itu membuka fail yang tidak dapat dibaca oleh Perpustakaan. Pautkan folder, atau "
+        "fail Word, Excel, PowerPoint, PDF, teks atau CSV."
+    ),
+    "That folder is in the Library already. Use Sync now on it instead.": (
+        "Folder itu sudah ada dalam Perpustakaan. Guna Segerak sekarang padanya."
+    ),
+    "Some of those files have no readable text yet. Sync the folder first.": (
+        "Sebahagian fail itu belum ada teks yang boleh dibaca. Segerakkan folder itu dahulu."
+    ),
+    "None of these files reads like a procedure (an SOP, guide, policy or checklist). Open Files and pick the ones to turn into SOP drafts.": (  # noqa: E501
+        "Tiada fail ini yang berbunyi seperti prosedur (SOP, panduan, polisi atau senarai semak). "
+        "Buka Fail dan pilih yang hendak dijadikan draf SOP."
+    ),
+    # ------------------------------------------------------------ P73 feedback (routers/feedback)
+    "Only the system's developer can do this.": "Hanya pembangun sistem boleh buat ini.",
+    "Feedback is switched off right now.": "Maklum balas sedang dimatikan.",
+    "The screenshot must be a PNG, JPEG or WebP image.": (
+        "Tangkapan skrin mesti imej PNG, JPEG atau WebP."
+    ),
+    "That screenshot is too large (6 MB at most).": (
+        "Tangkapan skrin itu terlalu besar (paling banyak 6 MB)."
+    ),
+    "Take the screenshot first, or send it as general feedback.": (
+        "Ambil tangkapan skrin dahulu, atau hantar sebagai maklum balas umum."
+    ),
+    "Write a few words about what you noticed.": "Tulis sedikit tentang apa yang anda perasan.",
+    "That is a lot of feedback in one hour. Thank you! Try again a little later.": (
+        "Banyak maklum balas dalam sejam. Terima kasih! Cuba lagi sekejap lagi."
+    ),
+    "That feedback is not here.": "Maklum balas itu tiada di sini.",
+    "That feedback has no screenshot.": "Maklum balas itu tiada tangkapan skrin.",
+    "Send requests as application/json.": "Hantar permintaan sebagai application/json.",
+    "Reload the page and try again.": "Muat semula halaman dan cuba lagi.",
+    "Some fields need fixing.": "Ada medan yang perlu dibetulkan.",
+    "Something failed on the server. Check the api logs.": (
+        "Ada masalah di pelayan. Semak log api."
+    ),
+    "That page cursor is not valid.": "Kursor halaman itu tidak sah.",
+    "Too many failed sign-ins. Try again in {minutes} min.": (
+        "Terlalu banyak cubaan log masuk gagal. Cuba lagi dalam {minutes} minit."
+    ),
+    "Email or password is incorrect.": "E-mel atau kata laluan salah.",
+    "This account is disabled.": "Akaun ini dinyahaktifkan.",
+    "This account is not in any workspace yet.": "Akaun ini belum ada dalam mana-mana ruang kerja.",
+    "Current password is incorrect.": "Kata laluan semasa salah.",
+    "Pick a password you have not used here.": "Pilih kata laluan yang belum pernah anda guna di sini.",
+    "This install is set up.": "Pemasangan ini sudah disediakan.",
+    "Your role cannot read this workspace.": "Peranan anda tidak boleh membaca ruang kerja ini.",
+    # ------------------------------------------------------------ P57 two-step sign-in (api/routers/two_factor, auth)
+    "Your company requires two-step sign-in. Set it up to continue.": (
+        "Syarikat anda mewajibkan log masuk dua langkah. Sediakannya untuk teruskan."
+    ),
+    "This sign-in timed out. Enter your password again.": (
+        "Log masuk ini sudah tamat masa. Masukkan kata laluan anda semula."
+    ),
+    "Too many wrong codes. Try again in {minutes} min.": (
+        "Terlalu banyak kod salah. Cuba lagi dalam {minutes} minit."
+    ),
+    "Too many wrong codes. Sign in again.": "Terlalu banyak kod salah. Log masuk semula.",
+    "Enter the 6-digit code from your app.": "Masukkan kod 6 digit daripada aplikasi anda.",
+    "That recovery code is not right, or it was used already.": (
+        "Kod pemulihan itu salah, atau sudah digunakan."
+    ),
+    "That code is not right. Use the newest code in your app.": (
+        "Kod itu salah. Guna kod terbaharu dalam aplikasi anda."
+    ),
+    "Two-step sign-in is already on. Turn it off first to move it to a new phone.": (
+        "Log masuk dua langkah sudah aktif. Matikannya dahulu untuk pindah ke telefon baharu."
+    ),
+    "Start the setup again.": "Mulakan persediaan semula.",
+    "Two-step sign-in is not on.": "Log masuk dua langkah belum aktif.",
+    "Only an owner can change two-step sign-in for the company.": (
+        "Hanya pemilik boleh menukar log masuk dua langkah untuk syarikat."
+    ),
+    "Turn off your own two-step sign-in in Settings.": (
+        "Matikan log masuk dua langkah anda sendiri dalam Tetapan."
+    ),
+    # ------------------------------------------------------------ role names and statuses (i18n/labels)
+    "Owner": "Pemilik",
+    "Admin": "Admin",
+    "Branch manager": "Pengurus cawangan",
+    "Head of department": "Ketua jabatan",
+    "Supervisor": "Penyelia",
+    "Staff": "Kakitangan",
+    "Operator": "Operator",
+    "Approver": "Pelulus",
+    "Viewer": "Pemerhati",
+    "Management": "Pengurusan",
+    "HR": "Sumber manusia (HR)",
+    # "{name} is {status}." reads "{name} {status}." in Malay.
+    "active|agent status": "aktif",
+    "paused|agent status": "sedang dijeda",
+    "retired|agent status": "sudah bersara",
+    # "Status tugasan ini ({status}) ... kepada {new_status}"
+    "in triage|task status": "dalam saringan",
+    "ready|task status": "sedia",
+    "running|task status": "sedang berjalan",
+    "waiting|task status": "menunggu",
+    "in review|task status": "dalam semakan",
+    "done|task status": "selesai",
+    "failed|task status": "gagal",
+    "cancelled|task status": "dibatalkan",
+    # "This was already {status}." -> "Ini sudah {status}."
+    "pending|decision status": "menunggu",
+    "approved|decision status": "diluluskan",
+    "denied|decision status": "ditolak",
+    "answered|decision status": "dijawab",
+    "expired|decision status": "tamat tempoh",
+    "cancelled|decision status": "dibatalkan",
+    "done|decision status": "selesai",
+    "sent|decision status": "dihantar",
+    "discarded|decision status": "dibuang",
+    "failed|decision status": "gagal",
+    "the whole workspace": "seluruh ruang kerja",
+    "your branch": "cawangan anda",
+    "your department": "jabatan anda",
+    "your own agents": "ejen anda sendiri",
+    "your company": "syarikat anda",
+    "its person": "pemiliknya",
+    # ------------------------------------------------------------ form fields (pydantic, by error type)
+    "Field required": "Wajib diisi",
+    "Should have at least {min_length} characters": "Sekurang-kurangnya {min_length} aksara",
+    "Should have at most {max_length} characters": "Paling banyak {max_length} aksara",
+    "Should have at least {min_length} items": "Sekurang-kurangnya {min_length} item",
+    "Should have at most {max_length} items": "Paling banyak {max_length} item",
+    "Should be greater than {gt}": "Mesti lebih daripada {gt}",
+    "Should be {ge} or more": "Mesti {ge} atau lebih",
+    "Should be less than {lt}": "Mesti kurang daripada {lt}",
+    "Should be {le} or less": "Mesti {le} atau kurang",
+    "Should be a whole number": "Mesti nombor bulat",
+    "Should be a number": "Mesti nombor",
+    "Should be true or false": "Mesti true atau false",
+    "Should be text": "Mesti teks",
+    "Should be a list": "Mesti senarai",
+    "Should be an object": "Mesti objek",
+    "Should be one of: {expected}": "Mesti salah satu daripada: {expected}",
+    "Not a known field": "Medan ini tidak dikenali",
+    "Not valid JSON": "JSON tidak sah",
+    "Not a valid web address": "Alamat web tidak sah",
+    "Not a valid date and time": "Tarikh dan masa tidak sah",
+    "Not a valid date": "Tarikh tidak sah",
+    "Not a valid id": "ID tidak sah",
+    # ------------------------------------------------------------ agents (routers/agents, twins, staff)
+    "That agent is not here.": "Ejen itu tiada di sini.",
+    "Your role ({role}) cannot change {name}.": "Peranan anda ({role}) tidak boleh mengubah {name}.",
+    "Your role ({role}) cannot add or change agents.": (
+        "Peranan anda ({role}) tidak boleh menambah atau mengubah ejen."
+    ),
+    "You already have your AI twin, {name}. You can change it any time.": (
+        "Anda sudah ada kembar AI, {name}. Anda boleh mengubahnya bila-bila masa."
+    ),
+    "You already have {name}. Make it your AI twin instead of adding another agent.": (
+        "Anda sudah ada {name}. Jadikan ia kembar AI anda; tidak perlu tambah ejen lain."
+    ),
+    "You already have {n} agents. Make one of them your AI twin instead of adding another agent.": (
+        "Anda sudah ada {n} ejen. Jadikan salah satu daripadanya kembar AI anda; tidak perlu "
+        "tambah ejen lain."
+    ),
+    "Pick a branch from this workspace.": "Pilih cawangan dalam ruang kerja ini.",
+    "Pick a department from this workspace.": "Pilih jabatan dalam ruang kerja ini.",
+    "That department is not in the chosen branch.": "Jabatan itu bukan dalam cawangan yang dipilih.",
+    "One of the SOPs is not here.": "Salah satu SOP itu tiada di sini.",
+    "Unknown tools: {tools}.": "Alat yang tidak dikenali: {tools}.",
+    "Ask an admin to create a company first.": "Minta admin cipta syarikat dahulu.",
+    "You can only place agents in {where}.": "Anda hanya boleh meletakkan ejen dalam {where}.",
+    "You already have your AI twin. You can change it any time.": (
+        "Anda sudah ada kembar AI. Anda boleh mengubahnya bila-bila masa."
+    ),
+    "{name} sits with {who}. Change {who}'s branch or department in Members; the twin follows when it is saved again.": (
+        "{name} diletakkan bersama {who}. Tukar cawangan atau jabatan {who} di Ahli; kembar AI ikut "
+        "bila ia disimpan semula."
+    ),
+    "{name} is {who}'s AI twin: only {who} can change its name, role, persona or colour. You can still pause it or adjust its tools, SOPs and budget.": (
+        "{name} ialah kembar AI {who}: hanya {who} boleh menukar nama, peranan, persona atau "
+        "warnanya. Anda masih boleh menjedanya atau melaraskan alat, SOP dan bajetnya."
+    ),
+    "An agent cannot report to itself.": "Ejen tidak boleh melapor kepada dirinya sendiri.",
+    "That would make a loop: someone above would end up reporting to this agent.": (
+        "Itu akan jadi kitaran: seseorang di atas akhirnya melapor kepada ejen ini."
+    ),
+    "That conversation is not here.": "Perbualan itu tiada di sini.",
+    "{name} is {status}.": "{name} {status}.",
+    "You have no AI twin yet.": "Anda belum ada kembar AI.",
+    "Only an agent of your own can become your twin.": (
+        "Hanya ejen milik anda sendiri boleh menjadi kembar AI anda."
+    ),
+    "You already have your AI twin.": "Anda sudah ada kembar AI.",
+    "Not saved: memory cannot change the rules, approvals or SOPs.": (
+        "Tidak disimpan: ingatan tidak boleh mengubah peraturan, kelulusan atau SOP."
+    ),
+    "Not saved: never keep passwords, keys, card or IC numbers in memory.": (
+        "Tidak disimpan: jangan simpan kata laluan, kunci, nombor kad atau nombor IC dalam ingatan."
+    ),
+    "{name}'s memory is full. Remove or merge a few entries first.": (
+        "Ingatan {name} sudah penuh. Buang atau gabungkan beberapa entri dahulu."
+    ),
+    "AI twins are for staff. Your role ({role}) adds agents from Agents.": (
+        "Kembar AI untuk kakitangan. Peranan anda ({role}) menambah ejen di Ejen."
+    ),
+    "This is for staff. Your role ({role}) adds agents from Agents.": (
+        "Ini untuk kakitangan. Peranan anda ({role}) menambah ejen di Ejen."
+    ),
+    "Meet your AI worker first (step 2).": "Kenali pekerja AI anda dahulu (langkah 2).",
+    "Your company and department come with your role. Ask an admin to change them.": (
+        "Syarikat dan jabatan anda ikut peranan anda. Minta admin untuk menukarnya."
+    ),
+    "Your company was set by your manager. Ask them to change it.": (
+        "Pengurus anda yang menetapkan syarikat anda. Minta pengurus untuk menukarnya."
+    ),
+    "Your department was set by your manager. Ask them to change it.": (
+        "Pengurus anda yang menetapkan jabatan anda. Minta pengurus untuk menukarnya."
+    ),
+    "Pick one of the companies.": "Pilih salah satu syarikat.",
+    "That department is not in the chosen company.": "Jabatan itu bukan dalam syarikat yang dipilih.",
+    "Duties repeat. For a one-off, give it a task instead.": (
+        "Tugas memang berulang. Untuk kerja sekali sahaja, beri tugasan."
+    ),
+    "Duty {n} ({title})": "Tugas {n} ({title})",
+    "{label}: {problem}": "{label}: {problem}",
+    "{label}: duties repeat. For a one-off, give it a task instead.": (
+        "{label}: tugas memang berulang. Untuk kerja sekali sahaja, beri tugasan."
+    ),
+    "Unknown workflow: {name}.": "Aliran kerja tidak dikenali: {name}.",
+    "Pick one of the blueprints.": "Pilih salah satu pelan tugas.",
+    "First task saved but not started: {problem}": (
+        "Tugasan pertama disimpan tetapi belum dimulakan: {problem}"
+    ),
+    # ------------------------------------------------------------ AI Engine
+    "A provider called {name} already exists.": "Penyedia bernama {name} sudah ada.",
+    "Changing the address needs the key typed again.": "Untuk menukar alamat, taip semula kuncinya.",
+    "That key looks too short.": "Kunci itu nampak terlalu pendek.",
+    "No usable key is saved. Enter the key again.": (
+        "Tiada kunci sah yang disimpan. Masukkan kunci semula."
+    ),
+    "Enter the address and the key to test.": "Masukkan alamat dan kunci untuk diuji.",
+    "Save a key first.": "Simpan kunci dahulu.",
+    "That model is not here.": "Model itu tiada di sini.",
+    "That workspace is not here.": "Ruang kerja itu tiada di sini.",
+    "That group is not here.": "Kumpulan itu tiada di sini.",
+    "One of the models belongs to a provider that is not here.": (
+        "Salah satu model itu milik penyedia yang tiada di sini."
+    ),
+    "That provider is not here.": "Penyedia itu tiada di sini.",
+    # ------------------------------------------------------------ assistants, Gmail, Calendar
+    "Up to 8 personal assistants each.": "Setiap orang boleh ada sehingga 8 pembantu peribadi.",
+    "Create a company (branch) first.": "Cipta syarikat (cawangan) dahulu.",
+    "That is not an OAuth Client ID (it ends with .apps.googleusercontent.com). An API key will not work for Gmail.": (
+        "Itu bukan OAuth Client ID (ia berakhir dengan .apps.googleusercontent.com). Kunci API "
+        "tidak boleh digunakan untuk Gmail."
+    ),
+    "Google sign-in was cancelled.": "Log masuk Google dibatalkan.",
+    "Could not reach Google. Try again.": "Tidak dapat menghubungi Google. Cuba lagi.",
+    "That draft is not here.": "Draf itu tiada di sini.",
+    "Connect Gmail again first.": "Sambung semula Gmail dahulu.",
+    "This draft was already handled.": "Draf ini sudah diuruskan.",
+    "That calendar change is not here.": "Perubahan kalendar itu tiada di sini.",
+    "Reconnect Google to add Calendar first.": "Sambung semula Google untuk menambah Calendar dahulu.",
+    "This is being handled already.": "Perkara ini sedang diuruskan.",
+    "This was already {status}.": "Ini sudah {status}.",
+    "That event was cancelled already.": "Acara itu sudah dibatalkan.",
+    "Google did not allow calendar access. Reconnect Google and tick the calendar box.": (
+        "Google tidak membenarkan akses kalendar. Sambung semula Google dan tandakan kotak kalendar."
+    ),
+    "That sign-in link expired. Start again from the dashboard.": (
+        "Pautan log masuk itu sudah tamat tempoh. Mula semula dari papan pemuka."
+    ),
+    "Google sign-in is not set up.": "Log masuk Google belum disediakan.",
+    "Google sign-in is not set up yet (Channels > Gmail).": (
+        "Log masuk Google belum disediakan (Saluran > Gmail)."
+    ),
+    "Google refused the sign-in: {why}": "Google menolak log masuk: {why}",
+    "Google gave no refresh token. Remove the app's access in your Google account and connect again.": (
+        "Google tidak memberi refresh token. Buang akses aplikasi ini dalam akaun Google anda, "
+        "kemudian sambung semula."
+    ),
+    "Gmail access was not granted. Tick the Gmail boxes on Google's screen.": (
+        "Akses Gmail tidak diberi. Tandakan kotak Gmail pada skrin Google."
+    ),
+    "Gmail needs reconnecting ({why}).": "Gmail perlu disambung semula ({why}).",
+    # ------------------------------------------------------------ blueprints, skills, learning
+    "One of the skills is not here.": "Salah satu kemahiran itu tiada di sini.",
+    "That blueprint is not here.": "Pelan tugas itu tiada di sini.",
+    "A blueprint with that name exists.": "Pelan tugas dengan nama itu sudah ada.",
+    "Each tool is allow, ask or deny.": "Setiap alat mesti allow, ask atau deny.",
+    "That proposal is not here.": "Cadangan itu tiada di sini.",
+    "Only approvers can change who uses a skill or retire it.": (
+        "Hanya pelulus boleh menukar siapa yang guna kemahiran atau membersarakannya."
+    ),
+    "Add at least one check, e.g. words the answer must contain.": (
+        "Tambah sekurang-kurangnya satu semakan, contohnya perkataan yang mesti ada dalam jawapan."
+    ),
+    "That test case is not here.": "Kes ujian itu tiada di sini.",
+    "The background worker is not reachable, so the tests cannot run.": (
+        "Perkhidmatan latar belakang tidak dapat dihubungi, jadi ujian tidak boleh dijalankan."
+    ),
+    "Add a test case first.": "Tambah kes ujian dahulu.",
+    "That skill is not here.": "Kemahiran itu tiada di sini.",
+    "Only active skills are optimized.": "Hanya kemahiran aktif boleh ditambah baik.",
+    "The background worker is not reachable, so the optimizer cannot run.": (
+        "Perkhidmatan latar belakang tidak dapat dihubungi, jadi penambahbaikan tidak boleh dijalankan."
+    ),
+    # ------------------------------------------------------------ memory (brain)
+    "That fact is not here.": "Fakta itu tiada di sini.",
+    "That company is not here.": "Syarikat itu tiada di sini.",
+    "There is no page at that path.": "Tiada halaman di laluan itu.",
+    "{path} is part of the vault and cannot be deleted.": (
+        "{path} sebahagian daripada vault dan tidak boleh dipadam."
+    ),
+    "Write one short fact. Secrets (passwords, keys, card or IC numbers) are never stored.": (
+        "Tulis satu fakta pendek. Rahsia (kata laluan, kunci, nombor kad atau IC) tidak akan disimpan."
+    ),
+    "Restore this fact before editing it.": "Pulihkan fakta ini sebelum mengubahnya.",
+    "Write one short fact, with no secrets.": "Tulis satu fakta pendek, tanpa rahsia.",
+    "That dream is not here.": "Mimpi itu tiada di sini.",
+    "The background worker is not reachable, so the dream cannot start.": (
+        "Perkhidmatan latar belakang tidak dapat dihubungi, jadi mimpi tidak boleh dimulakan."
+    ),
+    "That change is not in this dream.": "Perubahan itu tiada dalam mimpi ini.",
+    # ------------------------------------------------------------ broadcasts
+    "No active agents match that audience.": "Tiada ejen aktif yang sepadan dengan sasaran itu.",
+    "That broadcast is not here.": "Hebahan itu tiada di sini.",
+    "Pick who should receive this.": "Pilih siapa yang patut menerimanya.",
+    # ------------------------------------------------------------ channels: devices, Telegram, WhatsApp
+    "That device is not yours.": "Peranti itu bukan milik anda.",
+    "Turn on notifications on this device first.": "Hidupkan notifikasi pada peranti ini dahulu.",
+    "Notifications work on this device.": "Notifikasi berfungsi pada peranti ini.",
+    "This button expired. Open the app to decide.": (
+        "Butang ini sudah tamat tempoh. Buka aplikasi untuk membuat keputusan."
+    ),
+    "That approval is gone.": "Kelulusan itu sudah tiada.",
+    "You can no longer decide approvals.": "Anda tidak boleh lagi memutuskan kelulusan.",
+    "Approved.": "Diluluskan.",
+    "Denied.": "Ditolak.",
+    "That approval is not here.": "Kelulusan itu tiada di sini.",
+    "That channel is not here.": "Saluran itu tiada di sini.",
+    "Telegram did not accept that token: {error}": "Telegram tidak menerima token itu: {error}",
+    "Could not reach Telegram from the server.": "Pelayan tidak dapat menghubungi Telegram.",
+    "That token is not a bot token.": "Token itu bukan token bot.",
+    "That link is not here.": "Pautan itu tiada di sini.",
+    "That delivery is not here.": "Penghantaran itu tiada di sini.",
+    "Only failed deliveries can be retried.": "Hanya penghantaran yang gagal boleh dicuba semula.",
+    "Approval notifications are not resent; the app shows it.": (
+        "Notifikasi kelulusan tidak dihantar semula; aplikasi sudah memaparkannya."
+    ),
+    "That token is not here.": "Token itu tiada di sini.",
+    "The subscription has no keys.": "Langganan itu tiada kunci.",
+    "That is not a known browser push service.": "Itu bukan perkhidmatan push pelayar yang dikenali.",
+    "WhatsApp is already connected. Remove it first.": "WhatsApp sudah disambungkan. Buang dahulu.",
+    "The Meta Cloud API needs the phone number id, a permanent token and the app secret.": (
+        "Meta Cloud API perlukan phone number id, token kekal dan app secret."
+    ),
+    "Only WAHA sessions are started here.": "Hanya sesi WAHA yang dimulakan di sini.",
+    "Link your WhatsApp first.": "Pautkan WhatsApp anda dahulu.",
+    "Test from {url}: WhatsApp works.": "Ujian dari {url}: WhatsApp berfungsi.",
+    "No such channel.": "Saluran itu tiada.",
+    "Signature mismatch.": "Tandatangan tidak sepadan.",
+    # ------------------------------------------------------------ documents, files, packs, reports
+    "Only admins or this company's manager can change its kit.": (
+        "Hanya admin atau pengurus syarikat ini boleh menukar kitnya."
+    ),
+    "The logo must be an image.": "Logo mesti dalam bentuk gambar.",
+    "That template is not here.": "Templat itu tiada di sini.",
+    "A template with that name exists.": "Templat dengan nama itu sudah ada.",
+    "Upload a Word (.docx) file.": "Muat naik fail Word (.docx).",
+    "That Word file could not be opened.": "Fail Word itu tidak dapat dibuka.",
+    "No {{placeholders}} found. Type them into the Word file where values go, e.g. {{client_name}}, then upload it again.": (
+        "Tiada {{placeholders}} dijumpai. Taip {{placeholders}} dalam fail Word di tempat nilai "
+        "akan diisi, contohnya {{client_name}}, kemudian muat naik semula."
+    ),
+    "That document is not here.": "Dokumen itu tiada di sini.",
+    "This document is approved. Reopen it to change it.": (
+        "Dokumen ini sudah diluluskan. Buka semula untuk mengubahnya."
+    ),
+    "Your role cannot approve documents.": "Peranan anda tidak boleh meluluskan dokumen.",
+    "Fix these first: {problems}": "Betulkan perkara ini dahulu: {problems}",
+    "That version is not kept.": "Versi itu tidak disimpan.",
+    "The model gave no text. Try again.": "Model tidak memberi sebarang teks. Cuba lagi.",
+    "This document has no fields to fill.": "Dokumen ini tiada medan untuk diisi.",
+    "That file is not here.": "Fail itu tiada di sini.",
+    "Pick a company you work in.": "Pilih syarikat tempat anda bekerja.",
+    "Files can be up to {mb} MB.": "Fail boleh sehingga {mb} MB.",
+    "That file is empty.": "Fail itu kosong.",
+    "Only uploads are re-read.": "Hanya fail yang dimuat naik boleh dibaca semula.",
+    # P24 company documents (routers/files.py, company_files.py, intake.py)
+    "That folder name is not valid.": "Nama folder itu tidak sah.",
+    "This file is held back for review: it contains passwords or personal data. Ask someone who manages files to release it.": (
+        "Fail ini ditahan untuk disemak: ia mengandungi kata laluan atau data peribadi. "
+        "Minta orang yang mengurus fail untuk melepaskannya."
+    ),
+    "Pick one of: {kinds}.": "Pilih salah satu: {kinds}.",
+    "Pick a department of this file's company.": "Pilih jabatan dalam syarikat fail ini.",
+    "There are no files here to download.": "Tiada fail di sini untuk dimuat turun.",
+    "That is {size} MB of files; one download can hold up to 1 GB. Download one folder at a time.": (
+        "Jumlah fail itu {size} MB; satu muat turun boleh memuatkan sehingga 1 GB. "
+        "Muat turun satu folder pada satu masa."
+    ),
+    "Only people who manage files can release a held-back file.": (
+        "Hanya orang yang mengurus fail boleh melepaskan fail yang ditahan."
+    ),
+    "This file is not held back.": "Fail ini tidak ditahan.",
+    "That upload is not here.": "Muat naik itu tiada di sini.",
+    "You can add documents to your company only.": (
+        "Anda hanya boleh menambah dokumen ke syarikat anda."
+    ),
+    "Pick a department of that company.": "Pilih jabatan dalam syarikat itu.",
+    "One upload can be up to {mb} MB. Split the zip into smaller ones.": (
+        "Satu muat naik boleh sehingga {mb} MB. Pecahkan zip itu kepada beberapa yang lebih kecil."
+    ),
+    "That zip file cannot be opened.": "Fail zip itu tidak boleh dibuka.",
+    "Company documents": "Dokumen syarikat",
+    "That pack is not here.": "Pek itu tiada di sini.",
+    "{label}: that file is not here.": "{label}: fail itu tiada di sini.",
+    "{label}: that document is not here.": "{label}: dokumen itu tiada di sini.",
+    "No checklist came back. Try rephrasing.": "Tiada senarai semak diterima. Cuba tulis dengan cara lain.",
+    "That table is not here.": "Jadual data itu tiada di sini.",
+    "That report is not here.": "Laporan itu tiada di sini.",
+    "Your role ({role}) cannot see the impact report.": (
+        "Peranan anda ({role}) tidak boleh melihat laporan impak."
+    ),
+    # ------------------------------------------------------------ library, SOPs, objectives
+    "Pick a department.": "Pilih jabatan.",
+    "That department is in another company.": "Jabatan itu dalam syarikat lain.",
+    "Pick a company.": "Pilih syarikat.",
+    "You can add guidelines for {where} only.": "Anda hanya boleh menambah garis panduan untuk {where}.",
+    "That SOP is not here.": "SOP itu tiada di sini.",
+    "That objective is not here.": "Objektif itu tiada di sini.",
+    "Only owners, admins and managers set objectives.": (
+        "Hanya pemilik, admin dan pengurus boleh menetapkan objektif."
+    ),
+    "You can manage objectives for {where} only.": "Anda hanya boleh mengurus objektif untuk {where}.",
+    "Pick an objective you see.": "Pilih objektif yang anda boleh lihat.",
+    "Pick an objective you can see.": "Pilih objektif yang anda boleh lihat.",
+    '"{title}" belongs to another company.': '"{title}" milik syarikat lain.',
+    "An objective cannot sit under itself or one of its own parts.": (
+        "Objektif tidak boleh diletakkan di bawah dirinya sendiri atau bahagiannya sendiri."
+    ),
+    "Objectives nest at most {n} levels deep.": "Objektif hanya boleh bertingkat sehingga {n} peringkat.",
+    # ------------------------------------------------------------ MCP servers, media, monitor
+    "A server with that name exists.": "Pelayan dengan nama itu sudah ada.",
+    "Pick agents in this workspace.": "Pilih ejen dalam ruang kerja ini.",
+    "That server is not here.": "Pelayan itu tiada di sini.",
+    "Give an http(s) URL.": "Beri URL http(s).",
+    "Send a voice recording (audio/webm, audio/ogg, audio/mp4, audio/mpeg or audio/wav).": (
+        "Hantar rakaman suara (audio/webm, audio/ogg, audio/mp4, audio/mpeg atau audio/wav)."
+    ),
+    "That is a lot of recordings in a short time. Wait a few minutes and try again.": (
+        "Terlalu banyak rakaman dalam masa singkat. Tunggu beberapa minit dan cuba lagi."
+    ),
+    "Voice recordings can be up to {mb} MB.": "Rakaman suara boleh sehingga {mb} MB.",
+    "That browser is not open.": "Pelayar itu tidak dibuka.",
+    "Nothing on screen yet.": "Belum ada apa-apa pada skrin.",
+    # ------------------------------------------------------------ members and org
+    "Pick a department from here.": "Pilih jabatan di sini.",
+    "Pick a branch from here.": "Pilih cawangan di sini.",
+    "A branch manager needs a branch.": "Pengurus cawangan perlukan cawangan.",
+    "A head of department or supervisor needs a department.": (
+        "Ketua jabatan atau penyelia perlukan jabatan."
+    ),
+    "Staff need a branch (their own agents are placed there).": (
+        "Kakitangan perlukan cawangan (ejen mereka diletakkan di situ)."
+    ),
+    "You can only add people to {where}.": "Anda hanya boleh menambah orang ke {where}.",
+    "{email} is already a member.": "{email} sudah menjadi ahli.",
+    "You cannot change your own role. Ask another owner or admin.": (
+        "Anda tidak boleh menukar peranan sendiri. Minta pemilik atau admin lain."
+    ),
+    "A workspace needs at least one owner.": "Ruang kerja perlukan sekurang-kurangnya seorang pemilik.",
+    "You cannot remove yourself.": "Anda tidak boleh membuang diri sendiri.",
+    "Use Change password for your own account.": "Guna Tukar kata laluan untuk akaun anda sendiri.",
+    "That member is not here.": "Ahli itu tiada di sini.",
+    "Only an owner can change owner access.": "Hanya pemilik boleh menukar akses pemilik.",
+    "You can add and change only {roles} members.": (
+        "Anda hanya boleh menambah dan mengubah ahli {roles}."
+    ),
+    "Your role ({role}) cannot manage members.": "Peranan anda ({role}) tidak boleh mengurus ahli.",
+    "{branch} already has a department called {name}.": "{branch} sudah ada jabatan bernama {name}.",
+    "Pick an industry: {names}.": "Pilih industri: {names}.",
+    "That branch is not here.": "Cawangan itu tiada di sini.",
+    "That department is not here.": "Jabatan itu tiada di sini.",
+    # ------------------------------------------------------------ tasks and approvals
+    "That task is not here.": "Tugasan itu tiada di sini.",
+    "That address cannot be pinned. Pin a page of this app, or a web link starting with https://.": "Alamat itu tidak boleh disemat. Semat halaman dalam aplikasi ini, atau pautan web yang bermula dengan https://.",
+    "That is too much to keep.": "Itu terlalu banyak untuk disimpan.",
+    "Each section once.": "Setiap bahagian sekali sahaja.",
+    "It is not paused now.": "Ia tidak berehat sekarang.",
+    "This task does not wait for that one.": "Tugasan ini tidak menunggu tugasan itu.",
+    "Pick an agent from {where}.": "Pilih ejen dari {where}.",
+    "Pick files you can see.": "Pilih fail yang anda boleh lihat.",
+    "Pick a workflow you can see.": "Pilih aliran kerja yang anda boleh lihat.",
+    "Cancel the run before reassigning.": "Batalkan larian sebelum menugaskan semula.",
+    "A {status} task cannot be moved to {new_status} by hand.": (
+        "Status tugasan ini ({status}) tidak boleh ditukar kepada {new_status} secara manual."
+    ),
+    "Not a failed task you can see.": "Bukan tugasan gagal yang anda boleh lihat.",
+    "Over {n} per run: retry again.": "Melebihi {n} sekali cuba: cuba semula lagi.",
+    "Not tried: the worker service is not reachable.": (
+        "Tidak dicuba: perkhidmatan latar belakang tidak dapat dihubungi."
+    ),
+    "Only done, failed or cancelled work can be deleted. Cancel it first.": (
+        "Hanya kerja yang selesai, gagal atau dibatalkan boleh dipadam. Batalkan dahulu."
+    ),
+    "A sub-task of this work is still open. Let it finish or cancel it first.": (
+        "Ada sub-tugasan kerja ini yang masih terbuka. Biarkan ia siap atau batalkan dahulu."
+    ),
+    'This is a step of the workflow run "{title}", which is still going.': (
+        'Ini satu langkah dalam larian aliran kerja "{title}", yang masih berjalan.'
+    ),
+    "Only work in review can be accepted.": "Hanya kerja dalam semakan boleh diterima.",
+    "Only finished work can be sent back.": "Hanya kerja yang sudah siap boleh dihantar semula.",
+    "Assign an agent first.": "Tugaskan ejen dahulu.",
+    "Pick tasks you can see to wait for.": "Pilih tugasan yang anda boleh lihat untuk ditunggu.",
+    "Type an answer.": "Taip jawapan.",
+    "Approve or deny this request.": "Luluskan atau tolak permintaan ini.",
+    "Temporal is not reachable, so the decision was not sent. Try again in a moment.": (
+        "Temporal tidak dapat dihubungi, jadi keputusan tidak dihantar. Cuba semula sebentar lagi."
+    ),
+    # ------------------------------------------------------------ meetings, schedules (routers/teams)
+    "That meeting is not here.": "Mesyuarat itu tiada di sini.",
+    "Pick a task from here.": "Pilih tugasan di sini.",
+    "This meeting has ended.": "Mesyuarat ini sudah tamat.",
+    "That schedule is not here.": "Jadual itu tiada di sini.",
+    "Saved, but the worker service is not reachable, so it will not run yet. Save again in a moment.": (
+        "Disimpan, tetapi perkhidmatan latar belakang tidak dapat dihubungi, jadi ia belum akan "
+        "berjalan. Simpan semula sebentar lagi."
+    ),
+    "The worker service is not reachable; try again so the schedule really stops.": (
+        "Perkhidmatan latar belakang tidak dapat dihubungi; cuba lagi supaya jadual betul-betul berhenti."
+    ),
+    "The worker service is not reachable.": "Perkhidmatan latar belakang tidak dapat dihubungi.",
+    "Not here.": "Tiada di sini.",
+    # ------------------------------------------------------------ saved logins, browser tasks
+    "That login is not here.": "Log masuk itu tiada di sini.",
+    "You cannot change this login.": "Anda tidak boleh mengubah log masuk ini.",
+    "Pick agents you can see.": "Pilih ejen yang anda boleh lihat.",
+    "You have no branch.": "Anda tiada cawangan.",
+    "Give the site address.": "Beri alamat laman.",
+    "A login with that name exists.": "Log masuk dengan nama itu sudah ada.",
+    "Your role ({role}) cannot see saved logins.": (
+        "Peranan anda ({role}) tidak boleh melihat log masuk tersimpan."
+    ),
+    "{name} cannot use the browser yet. Ask whoever manages {name} to give it the browser tools (Permissions), or pick another agent.": (
+        "{name} belum boleh guna pelayar. Minta orang yang mengurus {name} memberinya alat pelayar "
+        "(Kebenaran), atau pilih ejen lain."
+    ),
+    "{name} may not use a saved login called '{login}'.": (
+        "{name} tidak dibenarkan guna log masuk tersimpan bernama '{login}'."
+    ),
+    # ------------------------------------------------------------ web addresses (core/ssrf)
+    "Use an http:// or https:// address.": "Guna alamat http:// atau https://.",
+    "Put the key in the key field, not in the URL.": "Letak kunci dalam medan kunci, bukan dalam URL.",
+    "That address has no host name.": "Alamat itu tiada nama hos.",
+    "{host} is a private address, which is not allowed.": (
+        "{host} ialah alamat peribadi, dan itu tidak dibenarkan."
+    ),
+    "{host} points to a private address ({ip}), which is not allowed.": (
+        "{host} menghala ke alamat peribadi ({ip}), dan itu tidak dibenarkan."
+    ),
+    "Could not find {host}. Check the address.": "{host} tidak dijumpai. Semak alamatnya.",
+    # ------------------------------------------------------------ notifications (channels/deliver)
+    "{name} has a question": "{name} ada soalan",
+    "Open it to answer.": "Buka untuk menjawab.",
+    "{name} is over budget": "{name} melebihi bajet",
+    "Approve more budget to continue.": "Luluskan bajet tambahan untuk teruskan.",
+    "{name} needs a decision": "{name} perlukan keputusan anda",
+    "Wants to: {tool}": "Mahu {tool}",
+    "Wants to: {tool}: {why}": "Mahu {tool}: {why}",
+    "An agent": "Seorang ejen",
+    "Task: {title}": "Tugasan: {title}",
+    "Open to answer: {url}": "Buka untuk menjawab: {url}",
+    "Open to approve or deny: {url}": "Buka untuk luluskan atau tolak: {url}",
+    "Reply to this message with your answer.": "Balas mesej ini dengan jawapan anda.",
+    "Approve": "Luluskan",
+    "Deny": "Tolak",
+    "Message from {agent}": "Mesej daripada {agent}",
+    "Message from {agent} for {owner}": "Mesej daripada {agent} bagi pihak {owner}",
+    "{name} drafted an email": "{name} sudah mendraf e-mel",
+    "To {to}: {subject}\n\n{preview}\n\nApprove to send it.": (
+        "Kepada {to}: {subject}\n\n{preview}\n\nLuluskan untuk menghantarnya."
+    ),
+    "{name} wants to add a calendar event": "{name} mahu menambah acara kalendar",
+    "{name} wants to change a calendar event": "{name} mahu mengubah acara kalendar",
+    "{name} wants to cancel a calendar event": "{name} mahu membatalkan acara kalendar",
+    "Confirm it to add it and update the guests.": "Sahkan untuk menambahnya dan memaklumkan tetamu.",
+    "Confirm it to change it and update the guests.": (
+        "Sahkan untuk mengubahnya dan memaklumkan tetamu."
+    ),
+    "Confirm it to cancel it and update the guests.": (
+        "Sahkan untuk membatalkannya dan memaklumkan tetamu."
+    ),
+    "Confirm it to add it.": "Sahkan untuk menambahnya.",
+    "Confirm it to change it.": "Sahkan untuk mengubahnya.",
+    "Confirm it to cancel it.": "Sahkan untuk membatalkannya.",
+    # ------------------------------------------------------------ Telegram and WhatsApp bots
+    "This bot belongs to a private office. To use it, open the dashboard: Channels > Telegram > Link my account, then send the code shown there.": (
+        "Bot ini milik pejabat persendirian. Untuk menggunakannya, buka papan pemuka: "
+        "Saluran > Telegram > Pautkan akaun saya, kemudian hantar kod yang dipaparkan di situ."
+    ),
+    "You are linked. Send a message to talk to your office.": (
+        "Akaun anda sudah dipautkan. Hantar mesej untuk bercakap dengan pejabat anda."
+    ),
+    "Your account is no longer in this workspace.": "Akaun anda tiada lagi dalam ruang kerja ini.",
+    "Messages here go to {name} ({role}).": "Mesej di sini dihantar kepada {name} ({role}).",
+    "Messages here go to {name}.": "Mesej di sini dihantar kepada {name}.",
+    "No agent answers in this chat yet.": "Belum ada ejen yang menjawab dalam sembang ini.",
+    "No agent answers here yet.": "Belum ada ejen yang menjawab di sini.",
+    "Approvals arrive here with buttons. Reply to a question to answer it.": (
+        "Kelulusan sampai di sini dengan butang. Balas soalan untuk menjawabnya."
+    ),
+    "Notices and approvals arrive here too.": "Notis dan kelulusan juga sampai di sini.",
+    "Your role can read but not instruct agents.": (
+        "Peranan anda boleh membaca tetapi tidak boleh memberi arahan kepada ejen."
+    ),
+    "No agent answers in this chat yet. Bind one in the dashboard: Channels > Telegram.": (
+        "Belum ada ejen yang menjawab dalam sembang ini. Tetapkan satu di papan pemuka: "
+        "Saluran > Telegram."
+    ),
+    "No agent answers here yet. Create your assistant in the dashboard (My assistants).": (
+        "Belum ada ejen yang menjawab di sini. Cipta pembantu anda di papan pemuka (Pembantu saya)."
+    ),
+    "(no answer)": "(tiada jawapan)",
+    "{name} could not answer: {error}": "{name} tidak dapat menjawab: {error}",
+    "{name} could not answer right now: {error}": "{name} tidak dapat menjawab sekarang: {error}",
+    "That code is wrong or expired. Make a new one in the dashboard.": (
+        "Kod itu salah atau sudah tamat tempoh. Jana kod baharu di papan pemuka."
+    ),
+    "That code is wrong or expired. Make a new one in the dashboard (Channels).": (
+        "Kod itu salah atau sudah tamat tempoh. Jana kod baharu di papan pemuka (Saluran)."
+    ),
+    "That code is for a different bot.": "Kod itu untuk bot lain.",
+    "That code is for a different channel.": "Kod itu untuk saluran lain.",
+    "That account no longer exists.": "Akaun itu sudah tiada.",
+    "Linked to {name}. Approvals will arrive here with buttons.": (
+        "Dipautkan kepada {name}. Kelulusan akan sampai di sini dengan butang."
+    ),
+    "Linked to {name}. Your agents' notices and approvals will arrive here, and you can message your assistant on this chat.": (
+        "Dipautkan kepada {name}. Notis dan kelulusan daripada ejen anda akan sampai di sini, "
+        "dan anda boleh menghantar mesej kepada pembantu anda dalam sembang ini."
+    ),
+    "Your role cannot answer this agent's questions.": (
+        "Peranan anda tidak boleh menjawab soalan ejen ini."
+    ),
+    "Thanks, your answer is on its way.": "Terima kasih, jawapan anda sedang dihantar.",
+    "Unknown button.": "Butang tidak dikenali.",
+    "Link your account first.": "Pautkan akaun anda dahulu.",
+    "Your role cannot decide approvals.": "Peranan anda tidak boleh memutuskan kelulusan.",
+    "This agent is outside your area.": "Ejen ini di luar kawasan anda.",
+    "Approved": "Diluluskan",
+    "Denied": "Ditolak",
+    "someone": "seseorang",
+    "✅ Approved by {name}": "✅ Diluluskan oleh {name}",
+    "✖️ Denied by {name}": "✖️ Ditolak oleh {name}",
+    # Voice notes (channels/voice)
+    "Voice notes are not set up here yet: an admin can add a speech-to-text model in AI Engine > Model groups > Speech to text. Please type your message for now.": (
+        "Nota suara belum disediakan di sini: admin boleh tambah model speech-to-text di "
+        "Enjin AI > Kumpulan model > Speech to text. Buat masa ini, taip mesej anda."
+    ),
+    "I could not make out that voice note right now. Please try again or type it.": (
+        "Saya tidak dapat menangkap nota suara itu sekarang. Cuba lagi atau taip mesej anda."
+    ),
+    "I could not hear any words in that voice note.": (
+        "Saya tidak dengar sebarang perkataan dalam nota suara itu."
+    ),
+    "I could not download that voice note. Please send it again or type it.": (
+        "Saya tidak dapat memuat turun nota suara itu. Hantar semula atau taip mesej anda."
+    ),
+    "That voice note is too long. Please keep it under {n} minutes.": (
+        "Nota suara itu terlalu panjang. Pastikan kurang daripada {n} minit."
+    ),
+    "That voice note is too large (over {mb} MB).": "Nota suara itu terlalu besar (lebih {mb} MB).",
+    # ------------------------------------------------------------ tool labels (approval notices: "Mahu ...")
+    "Calculator": "Kalkulator",
+    "Current time": "Masa sekarang",
+    "Team directory": "Direktori pasukan",
+    "Progress update": "Kemas kini kemajuan",
+    "Ask a person": "Tanya seseorang",
+    "Read a web page": "Baca halaman web",
+    "Search the web": "Cari di web",
+    "Search memory": "Cari dalam ingatan",
+    "Read a wiki page": "Baca halaman wiki",
+    "Write a wiki page": "Tulis halaman wiki",
+    "Remember a fact": "Ingat satu fakta",
+    "Edit core memory": "Ubah ingatan teras",
+    "Use a skill": "Guna kemahiran",
+    "Propose a skill": "Cadangkan kemahiran",
+    "Delegate work": "Agihkan kerja",
+    "Hold a meeting": "Adakan mesyuarat",
+    "Ask a colleague": "Tanya rakan sekerja",
+    "Call in helpers": "Panggil penolong",
+    "Open a web page in the browser": "Buka halaman web dalam pelayar",
+    "Look at the whole page": "Lihat seluruh halaman",
+    "Find on the page": "Cari dalam halaman",
+    "Wait for the page": "Tunggu halaman",
+    "Click in the browser": "Klik dalam pelayar",
+    "Type in the browser": "Taip dalam pelayar",
+    "Fill a form": "Isi borang",
+    "Do several steps in the browser": "Buat beberapa langkah dalam pelayar",
+    "Choose an option": "Pilih satu pilihan",
+    "Tick a box": "Tandakan kotak",
+    "Scroll the page": "Tatal halaman",
+    "Go back": "Kembali ke halaman sebelumnya",
+    "Read the page": "Baca halaman",
+    "Sign in with a saved login": "Log masuk dengan log masuk tersimpan",
+    "Send a form": "Hantar borang",
+    "Upload a file": "Muat naik fail",
+    "Save the page as PDF": "Simpan halaman sebagai PDF",
+    "Publish cited research": "Terbitkan kajian bersumber",
+    "Close the browser": "Tutup pelayar",
+    "Find an SOP": "Cari SOP",
+    "Publish a report": "Terbitkan laporan",
+    "List the company's files": "Senaraikan fail syarikat",
+    "Read a file": "Baca fail",
+    "Rename a file": "Namakan semula fail",
+    "Look at an image": "Lihat gambar",
+    "Company details": "Butiran syarikat",
+    "List document templates": "Senaraikan templat dokumen",
+    "Draft a document": "Draf dokumen",
+    "Draft an agent blueprint": "Draf pelan tugas ejen",
+    "Revise a document": "Pinda dokumen",
+    "Check a document": "Semak dokumen",
+    "Pack checklist": "Senarai semak pek",
+    "Attach to a pack": "Lampirkan pada pek",
+    "Find an external tool": "Cari alat luar",
+    "Describe an external tool": "Terangkan alat luar",
+    "Run an external tool": "Jalankan alat luar",
+    "Run Python code": "Jalankan kod Python",
+    "Company pulse": "Ringkasan syarikat",
+    "Team performance": "Prestasi pasukan",
+    "Where things slip": "Di mana kerja tertangguh",
+    "Notify a person": "Maklumkan seseorang",
+    "Message another agent": "Hantar mesej kepada ejen lain",
+    "Your role cannot stop tasks.": "Peranan anda tidak boleh menghentikan tugasan.",
+    "Only the workspace owner sets this.": "Hanya pemilik ruang kerja boleh menetapkan ini.",
+    "Only the owner chooses this computer.": "Hanya pemilik boleh memilih komputer ini.",
+    "Only the owner sets the web connections.": "Hanya pemilik boleh menetapkan sambungan web.",
+    "Paste at least one proxy first.": "Tampal sekurang-kurangnya satu proksi dahulu.",
+    "Choose one of the company's linked computers.": "Pilih salah satu komputer syarikat yang dipautkan.",
+    # P63 Sign in with Microsoft
+    "Sign in with Microsoft is not set up here yet.": "Log masuk dengan Microsoft belum disediakan di sini.",
+    "Enter your work email first, then press Sign in with Microsoft.": "Masukkan e-mel kerja anda dahulu, kemudian tekan Log masuk dengan Microsoft.",
+    "That Microsoft sign-in expired. Press Sign in with Microsoft again.": "Log masuk Microsoft itu telah tamat tempoh. Tekan Log masuk dengan Microsoft sekali lagi.",
+    "Microsoft's answer could not be checked. Try again.": "Jawapan Microsoft tidak dapat disemak. Cuba lagi.",
+    "This Microsoft organisation is not linked to the office. An admin links it on Channels > Microsoft 365 (Grant company-wide access).": "Organisasi Microsoft ini tidak dipautkan ke pejabat. Pentadbir memautkannya di Saluran > Microsoft 365 (Berikan akses seluruh syarikat).",
+    "No one with {email} is in this office yet. Ask your admin to add you, then sign in with Microsoft again.": "Belum ada sesiapa dengan {email} di pejabat ini. Minta pentadbir anda menambah anda, kemudian log masuk dengan Microsoft sekali lagi.",
+    "Too many tries. Wait a minute.": "Terlalu banyak cubaan. Tunggu seminit.",
+    "Set up the Microsoft app first.": "Sediakan aplikasi Microsoft dahulu.",
+    # P62 Web connections
+    "A computer carries only the sites you list, such as eperolehan.gov.my.": "Komputer hanya membawa laman yang anda senaraikan, seperti eperolehan.gov.my.",
+    "Choose Browse through a computer first.": "Pilih Layari melalui komputer dahulu.",
+    "One check at a time. Try again shortly.": "Satu semakan pada satu masa. Cuba lagi sebentar lagi.",
+    "Find the right agent": "Cari ejen yang sesuai",
+    "See the folders": "Lihat folder",
+    "File documents": "Failkan dokumen",
+    "Compile into one PDF": "Gabungkan menjadi satu PDF",
+    "Search my email": "Cari e-mel saya",
+    "Read an email": "Membaca e-mel",
+    "Draft a reply": "Draf balasan",
+    "Draft a new email": "Draf e-mel baharu",
+    "Search the library": "Cari dalam perpustakaan",
+    "Make a picture": "Hasilkan gambar",
+    "Schedule a job": "Jadualkan kerja",
+    "List my schedules": "Senaraikan jadual saya",
+    "Cancel a schedule": "Batalkan jadual",
+    "Read my calendar": "Baca kalendar saya",
+    "Find free time": "Cari masa lapang",
+    "Propose a calendar event": "Cadangkan acara kalendar",
+    "Propose a calendar change": "Cadangkan perubahan kalendar",
+    "Propose cancelling an event": "Cadangkan pembatalan acara",
+    "Keep a plan": "Catat rancangan",
+    "Finance calculator": "Kalkulator kewangan",
+    "Forecast a series": "Ramal siri data",
+    "Meeting minutes": "Minit mesyuarat",
+    "Read a full tool result": "Baca hasil penuh alat",
+    "Line up a task": "Masukkan tugasan dalam giliran",
+    "Research a question on the web": "Kaji soalan di web",
+    # ------------------------------------------------------------ English built in other modules
+    # Not marked at the source (owned elsewhere). Errors and notices that reach a person as
+    # plain English are matched against these templates when they are shown or sent.
+    # agents/launch.py
+    "Assign an agent before starting.": "Tugaskan ejen sebelum mula.",
+    "The assigned agent is not active.": "Ejen yang ditugaskan tidak aktif.",
+    "This task is already running.": "Tugasan ini sedang berjalan.",
+    "Could not start: the worker service is not reachable ({error}).": (
+        "Tidak dapat dimulakan: perkhidmatan latar belakang tidak dapat dihubungi ({error})."
+    ),
+    "Could not schedule the start: the worker service is not reachable.": (
+        "Tidak dapat menjadualkan permulaan: perkhidmatan latar belakang tidak dapat dihubungi."
+    ),
+    # agents/work_hours.py
+    "The start time must look like 09:00.": "Masa mula mesti dalam bentuk 09:00.",
+    "The end time must look like 09:00.": "Masa tamat mesti dalam bentuk 09:00.",
+    "The break start time must look like 09:00.": "Masa mula rehat mesti dalam bentuk 09:00.",
+    "The break end time must look like 09:00.": "Masa tamat rehat mesti dalam bentuk 09:00.",
+    "Working hours must be an object.": "Waktu bekerja mesti objek.",
+    "Pick at least one working day.": "Pilih sekurang-kurangnya satu hari bekerja.",
+    "Days are numbers from 1 (Monday) to 7 (Sunday).": "Hari ialah nombor 1 (Isnin) hingga 7 (Ahad).",
+    "The day cannot start at 24:00.": "Hari tidak boleh bermula pada 24:00.",
+    "The day must end after it starts (overnight shifts are not supported).": (
+        "Waktu tamat mesti selepas waktu mula (syif semalaman tidak disokong)."
+    ),
+    "At most {n} breaks a day.": "Paling banyak {n} rehat sehari.",
+    "The breaks leave no time to work.": "Masa rehat tidak meninggalkan masa untuk bekerja.",
+    "Unknown time zone {tz}.": "Zon waktu tidak dikenali: {tz}.",
+    "Each break needs a start and an end.": "Setiap rehat perlukan masa mula dan masa tamat.",
+    "The break {start}–{end} must end after it starts.": (
+        "Rehat {start} hingga {end} mesti tamat selepas ia bermula."
+    ),
+    "The break {start}–{end} must be inside the working day.": (
+        "Rehat {start} hingga {end} mesti dalam waktu bekerja."
+    ),
+    "Breaks must not overlap.": "Masa rehat tidak boleh bertindih.",
+    # teams/blockers.py, teams/reconcile.py
+    "Only work that has not started can wait for other tasks.": (
+        "Hanya kerja yang belum bermula boleh menunggu tugasan lain."
+    ),
+    "A task can wait for at most {n} tasks.": "Satu tugasan boleh menunggu paling banyak {n} tugasan.",
+    "A task cannot wait for itself.": "Tugasan tidak boleh menunggu dirinya sendiri.",
+    "There is no task {id} to wait for.": "Tiada tugasan {id} untuk ditunggu.",
+    '"{title}" already waits for this task (directly or through others): waiting for it would block both forever.': (
+        '"{title}" sudah menunggu tugasan ini (secara terus atau melalui tugasan lain): menunggunya '
+        "akan menyekat kedua-duanya selama-lamanya."
+    ),
+    "Needs your decision: {title}": "Perlukan keputusan anda: {title}",
+    '"{title}" was cancelled. Start this anyway, remove the wait, or cancel it.': (
+        '"{title}" dibatalkan. Mulakan tugasan ini juga, buang penantian, atau batalkannya.'
+    ),
+    '"{title}" was failed. Start this anyway, remove the wait, or cancel it.': (
+        '"{title}" gagal. Mulakan tugasan ini juga, buang penantian, atau batalkannya.'
+    ),
+    "Stopped unexpectedly: {title}": "Terhenti tanpa diduga: {title}",
+    "The run stopped unexpectedly twice. Retry it or give it to another agent.": (
+        "Larian terhenti tanpa diduga dua kali. Cuba semula atau beri kepada ejen lain."
+    ),
+    # teams/review.py, teams/schedules.py, teams/meetings.py
+    "Pick an active office agent as the reviewer.": "Pilih ejen pejabat yang aktif sebagai penyemak.",
+    "Use five cron fields: minute hour day month weekday.": (
+        "Guna lima medan cron: minit jam hari bulan hari-minggu."
+    ),
+    "Run at most every 15 minutes.": "Jalankan paling kerap setiap 15 minit.",
+    "That cron expression is not valid ({error}).": "Ungkapan cron itu tidak sah ({error}).",
+    "A one-off runs on one date: pick the day and the time.": (
+        "Jadual sekali sahaja berjalan pada satu tarikh: pilih hari dan masanya."
+    ),
+    "Say what the meeting is about.": "Nyatakan tujuan mesyuarat.",
+    "A meeting needs at least two agents.": "Mesyuarat perlukan sekurang-kurangnya dua ejen.",
+    "At most {n} agents per meeting.": "Paling banyak {n} ejen setiap mesyuarat.",
+    # teams/budget.py, teams/heartbeat.py, teams/objectives.py, teams/schedules.py (notices)
+    "{name}: budget at {pct}%": "{name}: bajet sudah {pct}%",
+    "{name} has used {pct}% of its budget (today).": "{name} sudah guna {pct}% bajetnya (hari ini).",
+    "{name} has used {pct}% of its budget (this month).": (
+        "{name} sudah guna {pct}% bajetnya (bulan ini)."
+    ),
+    "{name} is free": "{name} sedang lapang",
+    "Nothing in my queue. What should I pick up, boss?": (
+        "Tiada kerja dalam giliran saya. Apa yang patut saya buat, bos?"
+    ),
+    "Objective budget at {pct}%": "Bajet objektif sudah {pct}%",
+    '"{title}" has spent US${spent} of its US${budget} budget ({pct}%).': (
+        '"{title}" sudah membelanjakan US${spent} daripada bajet US${budget} ({pct}%).'
+    ),
+    '"{title}" has spent US${spent} of its US${budget} budget ({pct}%). New work under it now waits for an approval.': (
+        '"{title}" sudah membelanjakan US${spent} daripada bajet US${budget} ({pct}%). Kerja '
+        "baharu di bawahnya kini menunggu kelulusan."
+    ),
+    "{who} could not finish: {title}": "{who} tidak dapat menyiapkan: {title}",
+    "Scheduled job failed: {name}": "Kerja berjadual gagal: {name}",
+    "Done.": "Selesai.",
+    "It failed.": "Gagal.",
+    # brain/pages.py, brain/core.py
+    "Give the page a path, like wiki/topics/payroll.md.": (
+        "Beri laluan untuk halaman ini, contohnya wiki/topics/payroll.md."
+    ),
+    "That path is too long.": "Laluan itu terlalu panjang.",
+    "'{part}' is not allowed in a page path. Use letters, numbers, spaces and - _ .": (
+        "'{part}' tidak dibenarkan dalam laluan halaman. Guna huruf, nombor, ruang dan - _ ."
+    ),
+    "{file} is limited to {cap} characters ({used} given). Shorten or merge entries.": (
+        "{file} dihadkan kepada {cap} aksara ({used} diberi). Pendekkan atau gabungkan entri."
+    ),
+    # skills/store.py, skills/format.py
+    "There is no skill called {name} to update.": "Tiada kemahiran bernama {name} untuk dikemas kini.",
+    "{name} already says exactly this.": "{name} sudah menyatakan perkara yang sama.",
+    "The safety scan found problems. Edit the skill to fix them first.": (
+        "Imbasan keselamatan menjumpai masalah. Ubah kemahiran itu untuk membetulkannya dahulu."
+    ),
+    "A skill called {name} exists now; propose a patch instead.": (
+        "Kemahiran bernama {name} sudah ada; cadangkan pembetulan untuknya."
+    ),
+    "The skill this proposal changes no longer exists.": (
+        "Kemahiran yang diubah oleh cadangan ini sudah tiada."
+    ),
+    "Give a link or paste the SKILL.md.": "Beri pautan atau tampal SKILL.md.",
+    "Use an https:// link to the SKILL.md.": "Gunakan pautan https:// ke SKILL.md.",
+    "That is not a SKILL.md: it needs frontmatter with a name and a description.": (
+        "Itu bukan SKILL.md: ia perlukan frontmatter dengan nama dan penerangan."
+    ),
+    "This skill is too long to import (over 12,000 characters).": (
+        "Kemahiran ini terlalu panjang untuk diimport (lebih 12,000 aksara)."
+    ),
+    "Skill names are short kebab-case, like compare-vendor-quotes.": (
+        "Nama kemahiran pendek dalam kebab-case, contohnya compare-vendor-quotes."
+    ),
+    "The description is one sentence (10-300 characters): what it does and when to use it.": (
+        "Keterangan mesti satu ayat (10-300 aksara): apa yang ia buat dan bila perlu digunakan."
+    ),
+    "The skill needs instructions.": "Kemahiran ini perlukan arahan.",
+    "Keep a skill under {n} characters; split it if needed.": (
+        "Pastikan kemahiran kurang daripada {n} aksara; pecahkan jika perlu."
+    ),
+    # api/routers/desk.py (My workspace)
+    "Your workspace holds up to {n} pinned items. Unpin one first.": (
+        "Ruang kerja anda memuatkan sehingga {n} item yang disemat. Nyahsemat satu dahulu."
+    ),
+    "That is not here, or you cannot open it.": "Item itu tiada, atau anda tidak boleh membukanya.",
+    "That is not on your workspace.": "Item itu tiada dalam ruang kerja anda.",
+    "You have no AI worker yet. Hire one in My AI, or pick an agent.": (
+        "Anda belum ada pekerja AI. Ambil satu di AI saya, atau pilih ejen."
+    ),
+    "Find: {what}": "Cari: {what}",
+    # api/routers/forms.py (Forms)
+    "That form is not here.": "Borang itu tiada di sini.",
+    "Only managers add and change their company's forms.": (
+        "Hanya pengurus boleh menambah dan menukar borang syarikat mereka."
+    ),
+    "There is no such ready-made form.": "Tiada borang siap sedia seperti itu.",
+    "This form has no file to download.": "Borang ini tiada fail untuk dimuat turun.",
+    "This round was already accepted.": "Pusingan ini sudah diterima.",
+    "Say what to fix when you return it.": "Nyatakan apa yang perlu dibetulkan apabila memulangkannya.",
+    "Fill in: {form}": "Isi: {form}",
+    "Read a company form": "Baca borang syarikat",
+    "Fill in a company form": "Isi borang syarikat",
+    "Only managers and owners choose who else may see a task.": (
+        "Hanya pengurus dan pemilik boleh memilih siapa lagi yang boleh melihat tugasan."
+    ),
+    "You can only choose for your own AI workers or the agents you manage.": (
+        "Anda hanya boleh memilih untuk pekerja AI anda sendiri atau ejen yang anda urus."
+    ),
+    # documents/fill.py KIT_FIELDS (the company kit's labels)
+    "Legal name": "Nama berdaftar",
+    "Trading name": "Nama perniagaan",
+    "Registration no.": "No. pendaftaran",
+    "Tax / SST no.": "No. cukai / SST",
+    "Incorporated on": "Tarikh diperbadankan",
+    "Address": "Alamat",
+    "Phone": "Telefon",
+    "Email": "E-mel",
+    "Website": "Laman web",
+    "Bank": "Bank",
+    "Account no.": "No. akaun",
+    "Account holder": "Pemegang akaun",
+    "Signatory name": "Nama penandatangan",
+    "Signatory title": "Jawatan penandatangan",
+    "Directors (one per line)": "Pengarah (satu setiap baris)",
+    "Currency": "Mata wang",
+    "Tax label": "Label cukai",
+    "Tax rate (%)": "Kadar cukai (%)",
+    "Payment terms": "Terma bayaran",
+    "Document language": "Bahasa dokumen",
+    "Brand colour": "Warna jenama",
+    "Footer note": "Nota kaki",
+    # member import (members_import)
+    "That file could not be read as Excel. Save it as .xlsx or CSV and try again.": (
+        "Fail itu tidak dapat dibaca sebagai Excel. Simpan sebagai .xlsx atau CSV dan cuba lagi."
+    ),
+    "This is an old Excel file (.xls). Save it as .xlsx or CSV and upload it again.": (
+        "Ini fail Excel lama (.xls). Simpan sebagai .xlsx atau CSV dan muat naik semula."
+    ),
+    "Could not find the Name and Email columns. Use the template, or name the columns Name and Email.": (
+        "Lajur Nama dan E-mel tidak dijumpai. Guna templat, atau namakan lajur itu Nama dan E-mel."
+    ),
+    "The sheet has no people under its header row.": (
+        "Tiada sesiapa di bawah baris tajuk dalam helaian ini."
+    ),
+    'Role "{text}" is not one the app knows. Set to {role}.': (
+        'Peranan "{text}" tidak dikenali. Ditetapkan sebagai {role}.'
+    ),
+    'Read "{text}" as {role}.': '"{text}" dibaca sebagai {role}.',
+    'No company called "{text}". Pick one.': 'Tiada syarikat bernama "{text}". Pilih satu.',
+    'Matched "{text}" to {name}.': '"{text}" dipadankan dengan {name}.',
+    'No department called "{text}" in {company}.': 'Tiada jabatan bernama "{text}" di {company}.',
+    'No department called "{text}". Pick one.': 'Tiada jabatan bernama "{text}". Pilih satu.',
+    'Several companies have a "{text}" department. Pick the company.': (
+        'Beberapa syarikat ada jabatan "{text}". Pilih syarikatnya.'
+    ),
+    "Name is missing.": "Nama tidak diisi.",
+    "Email is missing.": "E-mel tidak diisi.",
+    "{email} is not a valid email address.": "{email} bukan alamat e-mel yang sah.",
+    "{email} is in the sheet twice (row {row}).": "{email} ada dua kali dalam helaian (baris {row}).",
+    "Pick a role.": "Pilih peranan.",
+    "Already has an account. They sign in with their own password.": (
+        "Sudah ada akaun. Mereka log masuk dengan kata laluan sendiri."
+    ),
+    "Members": "Ahli",
+    "Name": "Nama",
+    "Role": "Peranan",
+    "Company": "Syarikat",
+    "Department": "Jabatan",
+    "Notes": "Nota",
+    "Lists": "Senarai",
+    "Companies": "Senarai syarikat",
+    "What they can do": "Apa yang mereka boleh buat",
+    "Example row: replace it with your people.": "Baris contoh: gantikan dengan orang anda.",
+    "Runs one company: its agents, work and people.": (
+        "Mengurus satu syarikat: ejen, kerja dan orangnya."
+    ),
+    "Runs one department.": "Mengurus satu jabatan.",
+    "Follows one department's work.": "Memantau kerja satu jabatan.",
+    "Works with their own agents.": "Bekerja dengan ejen sendiri.",
+    "Sees the whole workspace.": "Nampak seluruh ruang kerja.",
+    "members-template": "templat-ahli",
+    # org/starter.py
+    "Unknown industry. Pick one of: {names}.": "Industri tidak dikenali. Pilih salah satu: {names}.",
+    # engine/gateway.py (what a person sees when no model can answer)
+    "No model in the {group} group could answer.": (
+        "Tiada model dalam kumpulan {group} yang dapat menjawab."
+    ),
+    "There is no model group called '{group}'.": "Tiada kumpulan model bernama '{group}'.",
+    "The {group} group does not chat. Pick a chat group such as Smart or Fast.": (
+        "Kumpulan {group} bukan untuk sembang. Pilih kumpulan sembang seperti Smart atau Fast."
+    ),
+    "The {group} group has no models yet. Add some in AI Engine > Model groups.": (
+        "Kumpulan {group} belum ada model. Tambah di Enjin AI > Kumpulan model."
+    ),
+    "No model in the {group} group is usable right now (off, keyless or resting).": (
+        "Tiada model dalam kumpulan {group} yang boleh digunakan sekarang (dimatikan, tiada "
+        "kunci atau sedang berehat)."
+    ),
+    "The recording is empty.": "Rakaman itu kosong.",
+    "Voice recordings can be up to {n} minutes long.": "Rakaman suara boleh sehingga {n} minit.",
+    "Describe the picture to make.": "Terangkan gambar yang hendak dihasilkan.",
+    # Schedules: the questions teams/when.py asks back (P23)
+    "e.g. 'every Monday at 9am', 'every weekday at 8:30am', 'every 2 hours', "
+    "'tomorrow 9am', 'on 10 Oct at 4pm', or a cron line like '0 9 * * 1'": (
+        "cth. 'setiap Isnin 9 pagi', 'setiap hari bekerja jam 8.30 pagi', 'setiap 2 jam', "
+        "'esok 9 pagi', '10 Okt jam 4 petang', atau baris cron seperti '0 9 * * 1'"
+    ),
+    "e.g. 'setiap Isnin 9 pagi', 'setiap hari bekerja jam 8.30 pagi', 'setiap 2 jam', "
+    "'esok 3 petang', '1hb setiap bulan 9 pagi', or a cron line like '0 9 * * 1'": (
+        "cth. 'setiap Isnin 9 pagi', 'setiap hari bekerja jam 8.30 pagi', 'setiap 2 jam', "
+        "'esok 3 petang', '1hb setiap bulan 9 pagi', atau baris cron seperti '0 9 * * 1'"
+    ),
+    "Unknown time zone '{tz}'.": "Zon waktu '{tz}' tidak dikenali.",
+    "'{raw}' is not a time of day. Say e.g. 9 pagi or 3.30 petang.": (
+        "'{raw}' bukan waktu yang betul. Tulis, contohnya, 9 pagi atau 3.30 petang."
+    ),
+    "Is 12 pagi midnight or noon? Say 12 tengah malam or 12 tengah hari.": (
+        "12 pagi itu tengah malam atau tengah hari? Tulis 12 tengah malam atau 12 tengah hari."
+    ),
+    "'{raw}' is not a time of day. Say e.g. 6 pagi.": (
+        "'{raw}' bukan waktu yang betul. Tulis, contohnya, 6 pagi."
+    ),
+    "'{raw}': is that {h} pagi or {h} petang?": "'{raw}': maksud anda {h} pagi atau {h} petang?",
+    "Do you mean {hhmm} after midnight? Say {h} pagi (or {hhmm}) so the day is clear.": (
+        "Maksud anda {hhmm} selepas tengah malam? Tulis {h} pagi (atau {hhmm}) supaya harinya "
+        "jelas."
+    ),
+    "'{raw}': midnight is 12 tengah malam. Which time do you mean?": (
+        "'{raw}': tengah malam ialah 12 tengah malam. Pukul berapa yang anda maksudkan?"
+    ),
+    "'{raw}' is not a real date (day/month). Which day do you mean?": (
+        "'{raw}' bukan tarikh yang wujud (hari/bulan). Hari apa yang anda maksudkan?"
+    ),
+    "Is '{raw}' in the morning or in the afternoon? Say {hm} pagi or {hm} petang "
+    "(or {am} / {pm}).": (
+        "'{raw}' itu pagi atau petang? Tulis {hm} pagi atau {hm} petang (atau {am} / {pm})."
+    ),
+    "Is that 12 noon or midnight? Say 12 tengah hari or 12 tengah malam.": (
+        "Itu 12 tengah hari atau tengah malam? Tulis 12 tengah hari atau 12 tengah malam."
+    ),
+    "Is that {h} in the morning or in the evening? Say {h} pagi, {h} petang or {h} malam "
+    "(or {am} / {pm}).": (
+        "{h} itu pagi atau malam? Tulis {h} pagi, {h} petang atau {h} malam (atau {am} / {pm})."
+    ),
+    "'{raw}' is not a time of day. Say e.g. 9am or 4:30pm.": (
+        "'{raw}' bukan waktu yang betul. Tulis, contohnya, 9 pagi atau 4.30 petang."
+    ),
+    "Is that {h} in the morning or in the evening? Say {h}am or {h}pm (or {am} / {pm}).": (
+        "{h} itu pagi atau petang/malam? Tulis {h} pagi atau {h} petang/malam (atau {am} / {pm})."
+    ),
+    "At what time on that day? Say e.g. 9am or 16:30.": (
+        "Pukul berapa pada hari itu? Tulis, contohnya, 9 pagi atau 16:30."
+    ),
+    "At what time should it run? Say e.g. 9am or 16:30.": (
+        "Pukul berapa ia patut berjalan? Tulis, contohnya, 9 pagi atau 16:30."
+    ),
+    "At what time should it run? Say e.g. 9 pagi or 4.30 petang.": (
+        "Pukul berapa ia patut berjalan? Tulis, contohnya, 9 pagi atau 4.30 petang."
+    ),
+    "That has more than one time ({times}). Which one? (For several, set up one schedule each.)": (
+        "Ada lebih daripada satu waktu ({times}). Yang mana satu? (Untuk beberapa waktu, buat "
+        "satu jadual bagi setiap satu.)"
+    ),
+    "Is {raw} the {a} {month_b} or the {b} {month_a}? Write the month as a word, e.g. '10 Oct'.": (
+        "{raw} itu {a} {month_b} atau {b} {month_a}? Tulis nama bulan, contohnya '10 Okt'."
+    ),
+    "'{raw}' is not a real date. Which day do you mean?": (
+        "'{raw}' bukan tarikh yang wujud. Hari apa yang anda maksudkan?"
+    ),
+    "When should it run? {examples}.": "Bila ia patut berjalan? {examples}.",
+    "Name the days it should run instead, e.g. 'every Monday to Thursday at 9am' "
+    "(or 'setiap Isnin hingga Khamis 9 pagi').": (
+        "Sebutkan hari yang ia patut berjalan, contohnya 'setiap Isnin hingga Khamis 9 pagi'."
+    ),
+    "A schedule can't skip weeks or days. Shall it run every week on that day, or on fixed "
+    "dates such as the 1st and 15th of the month?": (
+        "Jadual tidak boleh melangkau minggu atau hari. Mahu ia berjalan setiap minggu pada hari "
+        "itu, atau pada tarikh tetap seperti 1hb dan 15hb setiap bulan?"
+    ),
+    "'The last day of the month' isn't possible. The 28th, or the 1st?": (
+        "'Hari terakhir bulan' tidak boleh dijadualkan. 28hb, atau 1hb?"
+    ),
+    "How long from now? Between a minute and a year.": (
+        "Berapa lama dari sekarang? Antara satu minit hingga setahun."
+    ),
+    "Run at most every {n} minutes.": "Jadual boleh berjalan paling kerap setiap {n} minit.",
+    "Between which times? Say e.g. 'between 9am and 5pm'.": (
+        "Antara pukul berapa? Tulis, contohnya, 'antara 9 pagi dan 5 petang'."
+    ),
+    "Use whole hours for the window, start before end, e.g. 9am to 5pm.": (
+        "Gunakan jam penuh untuk tempoh itu, dengan waktu mula sebelum waktu tamat, contohnya "
+        "9 pagi hingga 5 petang."
+    ),
+    "Every {n} minutes doesn't fit evenly into an hour. 15, 20 or 30 minutes, or every hour?": (
+        "Setiap {n} minit tidak sekata dalam sejam. 15, 20 atau 30 minit, atau setiap jam?"
+    ),
+    "That interval doesn't fit evenly into a day. Every 1, 2, 3, 4, 6, 8 or 12 hours?": (
+        "Selang itu tidak sekata dalam sehari. Setiap 1, 2, 3, 4, 6, 8 atau 12 jam?"
+    ),
+    "Which day of the month? e.g. 'every month on the 1st at 9am'.": (
+        "Hari bulan yang mana? Contohnya '1hb setiap bulan 9 pagi'."
+    ),
+    "Some months have no 29th, 30th or 31st, so it would skip them. The 28th or the 1st instead?": (
+        "Ada bulan yang tiada 29hb, 30hb atau 31hb, jadi bulan itu akan terlepas. Guna 28hb atau "
+        "1hb?"
+    ),
+    "Which date each year? e.g. 'every year on 1 Jan at 9am'.": (
+        "Tarikh apa setiap tahun? Contohnya 'setiap tahun 1 Jan 9 pagi'."
+    ),
+    "Which day of the week? e.g. 'every Monday at 9am'.": (
+        "Hari apa setiap minggu? Contohnya 'setiap Isnin 9 pagi'."
+    ),
+    "How often? {examples}.": "Berapa kerap? {examples}.",
+    "Those times have different minutes. Set up one schedule for each time.": (
+        "Minit bagi waktu-waktu itu berbeza. Buat satu jadual bagi setiap waktu."
+    ),
+    "That names several days. For a repeat, say 'every Monday and Friday'; for once, pick one "
+    "day.": (
+        "Itu menyebut beberapa hari. Untuk berulang, tulis 'setiap Isnin dan Jumaat'; untuk "
+        "sekali sahaja, pilih satu hari."
+    ),
+    "Which day next month, and at what time?": "Hari apa bulan depan, dan pukul berapa?",
+    "Which day next week, and at what time?": "Hari apa minggu depan, dan pukul berapa?",
+    "Once (today or tomorrow?) or every day at that time? Say e.g. 'tomorrow at 9am' or "
+    "'every day at 9am'.": (
+        "Sekali sahaja (hari ini atau esok?) atau setiap hari pada waktu itu? Tulis, contohnya, "
+        "'esok 9 pagi' atau 'setiap hari 9 pagi'."
+    ),
+    "I could not tell when. {examples}.": "Saya tidak pasti bila. {examples}.",
+    "{when} has already passed. Did you mean another day?": (
+        "{when} sudah berlalu. Maksud anda hari lain?"
+    ),
+    "That is more than a year away. Which date do you mean?": (
+        "Itu lebih daripada setahun lagi. Tarikh mana yang anda maksudkan?"
+    ),
+    # Workflows and workflow runs (routers + workflows/runs.py)
+    "That run is not here.": "Larian itu tiada di sini.",
+    "That workflow is not here.": "Aliran kerja itu tiada di sini.",
+    "Your role cannot take decisions.": "Peranan anda tidak boleh membuat keputusan.",
+    "This run has already finished.": "Larian ini sudah selesai.",
+    "{name} is not active.": "{name} tidak aktif.",
+    "A workflow with that name exists.": "Aliran kerja dengan nama itu sudah ada.",
+    "{n} run(s) of this workflow are still going. Cancel or finish them first.": "{n} larian aliran kerja ini masih berjalan. Batalkan atau selesaikannya dahulu.",
+    "Describe the job in a sentence or two.": "Terangkan kerja itu dalam satu dua ayat.",
+    "The model did not return a usable draft. Try again.": "Model tidak memberikan draf yang boleh digunakan. Cuba lagi.",
+    "The draft had no steps. Try rephrasing.": "Draf itu tiada langkah. Cuba tulis dengan cara lain.",
+    "This workflow has no steps yet.": "Aliran kerja ini belum ada langkah.",
+    "A workflow can run at most {n} steps.": "Satu aliran kerja boleh menjalankan paling banyak {n} langkah.",
+    "Add a Start step (or a step nothing leads into) so the run knows where to begin.": "Tambah langkah Mula (atau langkah yang tiada apa-apa menuju kepadanya) supaya larian tahu di mana hendak bermula.",
+    "Choose who does: {steps}.": "Pilih siapa yang buat: {steps}.",
+    'The decision "{title}" has no branches to choose from.': 'Keputusan "{title}" tiada cabang untuk dipilih.',
+    "That decision is not waiting.": "Keputusan itu tidak sedang menunggu.",
+    "Pick one of the decision's branches.": "Pilih satu cabang keputusan itu.",
+    "That step is not waiting for an answer.": "Langkah itu tidak sedang menunggu jawapan.",
+    "Write the answer first.": "Tulis jawapan dahulu.",
+    "That step is not waiting.": "Langkah itu tidak sedang menunggu.",
+    "Only a failed step can be retried.": "Hanya langkah yang gagal boleh dicuba semula.",
+    # SOPs and workflows drafted from documents (P24: intake/builders.py, routers/builders.py)
+    "Pick at least one document.": "Pilih sekurang-kurangnya satu dokumen.",
+    "Pick documents from one workspace.": "Pilih dokumen daripada satu ruang kerja.",
+    "None of these documents can be used yet: they are still being read, could not be read, or are held for review.": "Belum ada dokumen ini yang boleh digunakan: masih dibaca, tidak dapat dibaca, atau ditahan untuk semakan.",
+    "Pick a department of this company.": "Pilih jabatan syarikat ini.",
+    "Pick a company from this workspace.": "Pilih syarikat daripada ruang kerja ini.",
+    "The model did not return a usable workflow. Try again.": "Model tidak memberi aliran kerja yang boleh digunakan. Cuba lagi.",
+    "Reading part {i} of {n}": "Membaca bahagian {i} daripada {n}",
+    "Putting the parts together": "Menggabungkan semua bahagian",
+    "Writing the SOP": "Menulis SOP",
+    "Drafting the workflow": "Menyediakan draf aliran kerja",
+    "Waiting to start": "Menunggu untuk bermula",
+    "The build failed on the server. Try again.": "Binaan gagal di pelayan. Cuba lagi.",
+    'These documents do not seem to describe "{focus}". Check the name, or pick other documents.': 'Dokumen ini nampaknya tidak menerangkan "{focus}". Semak nama itu, atau pilih dokumen lain.',
+    "{name} is held for review because it may hold passwords or personal data. Release it first.": "{name} ditahan untuk semakan kerana mungkin mengandungi kata laluan atau data peribadi. Lepaskan dahulu.",
+    "{name} is still being read. Try again in a minute.": "{name} masih dibaca. Cuba lagi sekejap lagi.",
+    "{name} could not be read, so it cannot be used.": "{name} tidak dapat dibaca, jadi tidak boleh digunakan.",
+    "That build is not here.": "Binaan itu tiada di sini.",
+    "That suggestion is not here.": "Cadangan itu tiada di sini.",
+    "This suggestion is built already. Delete the draft instead.": "Cadangan ini sudah dibina. Padamkan drafnya jika tidak diperlukan.",
+    # Meeting minutes (routers/minutes.py)
+    "You can file meeting minutes for your department only.": "Anda hanya boleh memfailkan minit mesyuarat untuk jabatan anda.",
+    "You can file meeting minutes for your company only.": "Anda hanya boleh memfailkan minit mesyuarat untuk syarikat anda.",
+    "Recordings can be up to {size}.": "Rakaman boleh sehingga {size}.",
+    "You can read these minutes, not change them.": "Anda boleh membaca minit ini, tetapi tidak boleh mengubahnya.",
+    "Upload an audio or video recording (mp3, m4a, wav, ogg, webm, mp4, mov).": "Muat naik rakaman audio atau video (mp3, m4a, wav, ogg, webm, mp4, mov).",
+    "The server is short of disk space for this recording. Tell an admin.": "Ruang cakera pelayan tidak cukup untuk rakaman ini. Beritahu admin.",
+    "The minutes are not written yet.": "Minit belum ditulis lagi.",
+    "These minutes are approved in Documents. Reopen them there to change them.": "Minit ini sudah diluluskan dalam Dokumen. Buka semula di sana untuk mengubahnya.",
+    "Only a failed recording can be retried.": "Hanya rakaman yang gagal boleh dicuba semula.",
+    "The recording is no longer on the server. Upload it again.": "Rakaman itu sudah tiada di pelayan. Muat naik semula.",
+    "This recording is still being processed.": "Rakaman ini masih diproses.",
+    "There is no transcript yet.": "Transkrip belum ada lagi.",
+    "This recording has no separate speakers.": "Rakaman ini tidak diasingkan mengikut penutur.",
+    "There is no speaker {label} in this recording.": "Tiada penutur {label} dalam rakaman ini.",
+    "Names can be up to 80 characters.": "Nama boleh sehingga 80 aksara.",
+    "That speaker is not here.": "Penutur itu tiada di sini.",
+    "The audio is no longer kept.": "Audio itu sudah tidak disimpan.",
+    "There is no clear stretch of this voice.": "Tiada bahagian yang jelas untuk suara ini.",
+    "That action item is not here.": "Tindakan itu tiada di sini.",
+    "Use a date like 2026-10-31.": "Gunakan tarikh seperti 2026-10-31.",
+    "Pick an agent from {scope}.": "Pilih ejen daripada {scope}.",
+    # P25 provenance and review of what agents make (documents/provenance, routers/documents)
+    "{title}, made by {agent} (AI agent). Version {version}.": "{title}, disediakan oleh {agent} (ejen AI). Versi {version}.",
+    "{title}, saved from Documents. Version {version}.": "{title}, disimpan daripada Dokumen. Versi {version}.",
+    "This document is approved.": "Dokumen ini sudah diluluskan.",
+    "No agent made this document. Edit it yourself instead.": "Dokumen ini bukan disediakan oleh ejen. Sunting sendiri.",
+    "{name} is not active, so it cannot revise this. Edit it yourself instead.": "{name} tidak aktif, jadi tidak boleh membetulkan dokumen ini. Sunting sendiri.",
+    "{name} is still working on this task. Send it back when the task finishes.": "{name} masih membuat tugasan ini. Hantar semula selepas tugasan selesai.",
+    "Revise: {title}": "Betulkan: {title}",
+    "This was sent back already. Wait for {name} to revise it.": "Dokumen ini sudah dihantar semula. Tunggu {name} membetulkannya.",
+    "Export a document": "Eksport dokumen",
+    # P25 document search (search_tools.py)
+    "Search documents": "Cari dokumen",
+    # P29 security fixes (brain, skills, Gmail, members, twins)
+    "Only the people who manage this agent can change its memory.": "Hanya orang yang mengurus ejen ini boleh mengubah memorinya.",
+    "Not saved. Core memory cannot change the rules, approvals or SOPs.": "Tidak disimpan. Memori teras tidak boleh mengubah peraturan, kelulusan atau SOP.",
+    "Not saved. Never keep passwords, keys, card or IC numbers in memory.": "Tidak disimpan. Jangan simpan kata laluan, kunci, nombor kad atau IC dalam memori.",
+    "Not saved. How your AI speaks to you is set in Settings, not in memory.": "Tidak disimpan. Cara AI anda bercakap dengan anda ditetapkan dalam Tetapan, bukan dalam memori.",
+    "Only an owner or admin can publish a skill for the whole workspace; a manager can publish one only for the agents they manage.": "Hanya pemilik atau admin boleh menerbitkan kemahiran untuk seluruh ruang kerja; pengurus hanya boleh menerbitkannya untuk ejen yang diurusnya.",
+    "Sign in first, then connect Gmail again from Assistants.": "Log masuk dahulu, kemudian sambung Gmail semula daripada Pembantu.",
+    "This Google sign-in was started by someone else or in another browser. Start again from your own Assistants page.": "Log masuk Google ini dimulakan oleh orang lain atau dalam pelayar lain. Mulakan semula daripada halaman Pembantu anda sendiri.",
+    "This person also belongs to another workspace, so only they can change their password (Change password).": "Orang ini juga ahli ruang kerja lain, jadi hanya mereka boleh menukar kata laluan sendiri (Tukar kata laluan).",
+    "Your manager sets how far {name} may go: you can pause it or make it ask more, but not switch it back on, let it act alone, add tools, change its model or SOPs, or raise its budget.": "Pengurus anda menetapkan had {name}: anda boleh menjedanya atau menyuruhnya lebih kerap bertanya, tetapi tidak boleh menghidupkannya semula, membenarkannya bertindak sendiri, menambah alat, menukar model atau SOP, atau menaikkan bajetnya.",
+    # Task flow (routers/task_flow.py): a task on a schedule or into a workflow
+    "Assign an agent before setting it to repeat.": "Tugaskan ejen sebelum menetapkannya berulang.",
+    # P30 personal assistants only for people who manage others; staff have one AI (their twin)
+    "Personal assistants are for people who manage others. Your role ({role}) has one personal AI: your AI twin, in My AI.": "Pembantu peribadi adalah untuk orang yang mengurus orang lain. Peranan anda ({role}) ada satu AI peribadi: kembar AI anda, dalam AI saya.",
+    "{name} is paused: personal assistants are for people who manage others. Nothing was deleted; use your AI twin in My AI instead.": "{name} dijeda: pembantu peribadi adalah untuk orang yang mengurus orang lain. Tiada apa dipadam; guna kembar AI anda dalam AI saya.",
+    # P97 a chat's own reply language
+    "That reply language is not one the agents speak.": "Ejen tidak bercakap dalam bahasa balasan itu.",
+    "{name} is paused: personal assistants are for people who manage others.": "{name} dijeda: pembantu peribadi adalah untuk orang yang mengurus orang lain.",
+    "This personal assistant is paused: personal assistants are for people who manage others.": "Pembantu peribadi ini dijeda: pembantu peribadi adalah untuk orang yang mengurus orang lain.",
+    "Staff put only their own AI twin on a schedule.": "Kakitangan hanya boleh menjadualkan kembar AI mereka sendiri.",
+    "Your manager retired {name}. Ask them before making a new AI twin.": "Pengurus anda telah menamatkan {name}. Tanya mereka dahulu sebelum mencipta kembar AI baharu.",
+    # P31 the PC agent: a person's own computers (api/routers/devices.py, devices/, pc_tools)
+    "Linking a computer is for your own AI. Make your AI twin first (My AI), then link this computer.": "Memautkan komputer adalah untuk AI anda sendiri. Cipta kembar AI anda dahulu (AI saya), kemudian pautkan komputer ini.",
+    # P92 ePerolehan on the person's own PC (devices/tunnel.py pc_status, web_tasks.py)
+    "Your role does not give work to the AI, so it has no computer to link. Ask the owner if you need one.": (
+        "Peranan anda tidak memberi kerja kepada AI, jadi tiada komputer untuk dipautkan. "
+        "Tanya pemilik jika anda memerlukannya."
+    ),
+    "ePerolehan work runs on your own computer, and it is not ready: {next}": (
+        "Kerja ePerolehan berjalan pada komputer anda sendiri, dan ia belum sedia: {next}"
+    ),
+    "Your computer {name} is ready.": "Komputer anda {name} sudah sedia.",
+    "Turn on {name} and open Agentic Office PC on it.": (
+        "Hidupkan {name} dan buka Agentic Office PC padanya."
+    ),
+    "On {name}, press Allow on the Agentic Office page. We sent the request to it.": (
+        "Pada {name}, tekan Benarkan di halaman Agentic Office. Kami telah menghantar "
+        "permintaan kepadanya."
+    ),
+    "{name} has an older Agentic Office PC. On that computer, open My computers, download the app again and run it. Then press Allow.": (  # noqa: E501
+        "{name} menggunakan Agentic Office PC versi lama. Pada komputer itu, buka Komputer "
+        "saya, muat turun aplikasi sekali lagi dan jalankannya. Kemudian tekan Benarkan."
+    ),
+    "{name} is paused. Turn it back on in My computers.": (
+        "{name} dijeda. Hidupkan semula di Komputer saya."
+    ),
+    # P94: a computer coming back after a restart, and ePerolehan work getting the browser
+    "{name} is reconnecting. It was connected a moment ago and usually is back in a few seconds. You can start: the work waits for it.": (  # noqa: E501
+        "{name} sedang bersambung semula. Ia bersambung sebentar tadi dan biasanya kembali "
+        "dalam beberapa saat. Anda boleh mula: kerja akan menunggunya."
+    ),
+    "{agent} can't use the browser yet; ask whoever manages {agent} to allow it, or pick another agent.": (  # noqa: E501
+        "{agent} belum boleh guna pelayar; minta orang yang mengurus {agent} membenarkannya, "
+        "atau pilih ejen lain."
+    ),
+    # P96: work gets the office skill it needs, or the person is told who can give it
+    "{agent} doesn't have the office's skill {skill} for this yet. Ask {who} to give it, or pick another agent.": (  # noqa: E501
+        "{agent} belum ada kemahiran pejabat {skill} untuk kerja ini. Minta {who} memberikannya, "
+        "atau pilih ejen lain."
+    ),
+    "{agent} was given the office's skill {skill} for this work.": (
+        "{agent} diberi kemahiran pejabat {skill} untuk kerja ini."
+    ),
+    "an owner or admin": "pemilik atau admin",
+    "{a} or {b}": "{a} atau {b}",
+    "Link your computer first. It takes about 2 minutes: open My computers and press Link a computer.": (  # noqa: E501
+        "Pautkan komputer anda dahulu. Ia mengambil kira-kira 2 minit: buka Komputer saya dan "
+        "tekan Pautkan komputer."
+    ),
+    "You have {n} link codes open. Use one, or wait 10 minutes.": "Anda ada {n} kod pautan yang masih terbuka. Gunakan satu, atau tunggu 10 minit.",
+    "That link code is not here.": "Kod pautan itu tiada di sini.",
+    "Too many link attempts from this network. Wait 10 minutes and try again.": "Terlalu banyak cubaan memautkan dari rangkaian ini. Tunggu 10 minit dan cuba lagi.",
+    "That link code expired or was already used. Make a new one on the My computers page.": "Kod pautan itu sudah tamat tempoh atau sudah digunakan. Buat kod baharu di halaman Komputer saya.",
+    "This computer is not linked. Link it again.": "Komputer ini tidak dipautkan. Pautkan semula.",
+    "No file was asked for with this link.": "Tiada fail diminta melalui pautan ini.",
+    "That file is too big (over {mb} MB).": "Fail itu terlalu besar (melebihi {mb} MB).",
+    "That download link expired or was used.": "Pautan muat turun itu sudah tamat tempoh atau sudah digunakan.",
+    "That computer is not here.": "Komputer itu tiada di sini.",
+    "Not allowed.": "Tidak dibenarkan.",
+    "Folders should be a list of paths.": "Folder mestilah senarai laluan.",
+    "Pick at most {n} folders.": "Pilih paling banyak {n} folder.",
+    "Each folder must be a path of up to {n} characters.": "Setiap folder mestilah laluan sehingga {n} aksara.",
+    "Use the full path of each folder, from the drive (C:) or from /.": "Gunakan laluan penuh setiap folder, bermula dari pemacu (C:) atau dari /.",
+    "Find files on my PC": "Cari fail di PC saya",
+    "List a folder on my PC": "Senaraikan folder di PC saya",
+    "Read a file on my PC": "Baca fail di PC saya",
+    "Copy a file from my PC": "Salin fail dari PC saya",
+    "Save a file to my PC": "Simpan fail ke PC saya",
+    "That computer is not linked.": "Komputer itu tidak dipautkan.",
+    "Only your own AI (your twin or private assistant) can browse on your computer.": "Hanya AI anda sendiri (kembar atau pembantu peribadi anda) boleh melayari di komputer anda.",
+    "{name} is paused.": "{name} dijeda.",
+    "{name} is offline. Turn it on (the agent starts with it) and try again.": "{name} di luar talian. Hidupkannya (ejen bermula bersamanya) dan cuba lagi.",
+    # P33 privacy gateway: each company's data level (engine/privacy.py, engine/gateway.py)
+    "This company is set to Confidential: no trusted AI provider is available. Mark one as trusted on the AI Engine page or add one.": "Syarikat ini ditetapkan sebagai Sulit: tiada penyedia AI yang dipercayai tersedia. Tandakan satu sebagai dipercayai di halaman Enjin AI atau tambah satu.",
+    "This company is set to Local only: no AI model on this server is available for this job. Its data never goes to cloud AI providers.": "Syarikat ini ditetapkan sebagai Tempatan sahaja: tiada model AI di pelayan ini yang tersedia untuk kerja ini. Datanya tidak pernah dihantar kepada penyedia AI awan.",
+    "not trusted for this Confidential company": "tidak dipercayai untuk syarikat Sulit ini",
+    "cloud provider: this company is Local only": "penyedia awan: syarikat ini Tempatan sahaja",
+    "API data is not used for training by default.": "Data API tidak digunakan untuk latihan secara lalai.",
+    "API data is not used for training by default; may be kept briefly for abuse monitoring.": "Data API tidak digunakan untuk latihan secara lalai; mungkin disimpan seketika untuk pemantauan penyalahgunaan.",
+    "Processed and stored in China; trains on API data unless you opt out; no zero-retention option.": "Diproses dan disimpan di China; melatih model dengan data API melainkan anda memilih keluar; tiada pilihan simpanan sifar.",
+    "Free tier: Google uses prompts to improve its products; paid tier does not.": "Peringkat percuma: Google menggunakan gesaan untuk menambah baik produknya; peringkat berbayar tidak.",
+    "OpenRouter keeps no prompts; free endpoints may log or train - keep 'Require zero data retention' on.": "OpenRouter tidak menyimpan gesaan; titik akhir percuma mungkin merekod atau melatih - biarkan 'Wajibkan simpanan data sifar' dihidupkan.",
+    "Check data retention on your plan.": "Semak simpanan data pada pelan anda.",
+    "Runs on your own server; nothing leaves.": "Berjalan di pelayan anda sendiri; tiada apa yang keluar.",
+    "Check this provider's data policy.": "Semak dasar data penyedia ini.",
+    # P34 Microsoft 365 / Outlook through Microsoft Graph (api/routers/microsoft.py, microsoft/)
+    "That is not an Application (client) ID. Copy it from the app's Overview page in Microsoft Entra ID (it looks like 1a2b3c4d-...).": "Itu bukan ID Aplikasi (klien). Salin dari halaman Gambaran Keseluruhan aplikasi dalam Microsoft Entra ID (rupanya seperti 1a2b3c4d-...).",
+    "Tenant must be organizations, a Directory (tenant) ID, or a domain like contoso.onmicrosoft.com.": "Penyewa mestilah organizations, ID Direktori (penyewa), atau domain seperti contoso.onmicrosoft.com.",
+    "Enter the client secret (its Value, not its ID).": "Masukkan rahsia klien (Nilainya, bukan ID-nya).",
+    "Connecting Outlook is for your own AI. Make your AI twin first (My AI), then connect Outlook.": "Menyambung Outlook adalah untuk AI anda sendiri. Cipta kembar AI anda dahulu (AI saya), kemudian sambung Outlook.",
+    "Pick a team agent of that company (not a personal assistant).": "Pilih ejen pasukan syarikat itu (bukan pembantu peribadi).",
+    "That mailbox is not here.": "Peti mel itu tiada di sini.",
+    "Microsoft 365 is not set up yet (Channels > Microsoft 365).": "Microsoft 365 belum disediakan (Saluran > Microsoft 365).",
+    "Grant admin consent first (Channels > Microsoft 365) so the app knows your tenant.": "Berikan persetujuan pentadbir dahulu (Saluran > Microsoft 365) supaya aplikasi tahu penyewa anda.",
+    "That mailbox is already connected.": "Peti mel itu sudah disambungkan.",
+    "Microsoft let the app read this mailbox.": "Microsoft membenarkan aplikasi membaca peti mel ini.",
+    "Sign in first, then connect Outlook again.": "Log masuk dahulu, kemudian sambung Outlook semula.",
+    "Sign in as an owner or admin, then grant admin consent again.": "Log masuk sebagai pemilik atau admin, kemudian berikan persetujuan pentadbir semula.",
+    "Admin consent was not given.": "Persetujuan pentadbir tidak diberikan.",
+    "Microsoft sign-in was cancelled.": "Log masuk Microsoft dibatalkan.",
+    "Could not reach Microsoft. Try again.": "Tidak dapat menghubungi Microsoft. Cuba lagi.",
+    "Microsoft has no mailbox at that address.": "Microsoft tiada peti mel di alamat itu.",
+    "That Microsoft sign-in link expired. Start again from the dashboard.": "Pautan log masuk Microsoft itu sudah tamat tempoh. Mula semula dari papan pemuka.",
+    "This Microsoft sign-in was started by someone else or in another browser. Start again from your own page.": "Log masuk Microsoft ini dimulakan oleh orang lain atau dalam pelayar lain. Mula semula dari halaman anda sendiri.",
+    "Microsoft refused the sign-in: {why}": "Microsoft menolak log masuk: {why}",
+    "Microsoft gave no refresh token. Connect again and accept all the permissions.": "Microsoft tidak memberi token muat semula. Sambung semula dan terima semua kebenaran.",
+    "Mail access was not granted. Accept the mail permissions on Microsoft's screen.": "Akses mel tidak diberikan. Terima kebenaran mel di skrin Microsoft.",
+    "Outlook needs reconnecting. Connect Microsoft 365 again.": "Outlook perlu disambung semula. Sambung Microsoft 365 semula.",
+    "Outlook needs reconnecting ({why}).": "Outlook perlu disambung semula ({why}).",
+    "Microsoft sign-in failed for now ({why}).": "Log masuk Microsoft gagal buat masa ini ({why}).",
+    "Microsoft refused the app's sign-in: {why}": "Microsoft menolak log masuk aplikasi: {why}",
+    "Consent was given in Microsoft, but not from this page. Press Grant admin consent on the Channels page to finish.": "Persetujuan sudah diberikan dalam Microsoft, tetapi bukan dari halaman ini. Tekan Berikan persetujuan pentadbir di halaman Saluran untuk selesaikan.",
+    "This admin consent was started by someone else or in another browser. Start again from the Channels page.": "Persetujuan pentadbir ini dimulakan oleh orang lain atau dalam pelayar lain. Mula semula dari halaman Saluran.",
+    "Microsoft did not say which tenant gave consent.": "Microsoft tidak menyatakan penyewa mana yang memberi persetujuan.",
+    "Microsoft is busy (too many requests). Try again in a minute.": "Microsoft sedang sibuk (terlalu banyak permintaan). Cuba lagi dalam seminit.",
+    "Microsoft did not accept the sign-in for this mailbox.": "Microsoft tidak menerima log masuk untuk peti mel ini.",
+    "Microsoft Graph answered {status}: {why}": "Microsoft Graph menjawab {status}: {why}",
+    "That attachment is too big (over {mb} MB).": "Lampiran itu terlalu besar (melebihi {mb} MB).",
+    "Refused a link that is not Microsoft Graph.": "Pautan yang bukan Microsoft Graph ditolak.",
+    "Could not reach Microsoft Graph ({why}).": "Tidak dapat menghubungi Microsoft Graph ({why}).",
+    "Microsoft refused access to this mailbox. Ask the Microsoft 365 admin to include it in the app's RBAC for Applications scope.": "Microsoft menolak akses ke peti mel ini. Minta pentadbir Microsoft 365 memasukkannya ke dalam skop RBAC for Applications aplikasi ini.",
+    # P34 mail features: Outlook tools, approvals, the pipeline and the daily digest
+    # (agents/mail_tools.py, microsoft/features.py, microsoft/approvals.py)
+    "Check the Outlook inbox": "Semak peti masuk Outlook",
+    "Search Outlook": "Cari dalam Outlook",
+    "Read an Outlook email": "Baca e-mel Outlook",
+    "Draft an Outlook reply": "Draf balasan Outlook",
+    "Draft an Outlook email": "Draf e-mel Outlook",
+    "Save an email attachment": "Simpan lampiran e-mel",
+    "Read the Outlook calendar": "Baca kalendar Outlook",
+    "Find free time in Outlook": "Cari masa lapang dalam Outlook",
+    "Propose an Outlook event": "Cadang acara Outlook",
+    "Propose an Outlook change": "Cadang perubahan acara Outlook",
+    "Propose cancelling an Outlook event": "Cadang pembatalan acara Outlook",
+    "Connect Outlook first.": "Sambung Outlook dahulu.",
+    "The proposed event has no time.": "Acara yang dicadangkan tiada masa.",
+    "{count} emails reached {mailbox} in the last 24 hours.": "{count} e-mel sampai ke {mailbox} dalam 24 jam yang lalu.",
+    "Needs a person": "Perlukan seseorang",
+    "Waiting for a reply": "Menunggu balasan",
+    "Nobody has answered these in {hours} hours:": "Tiada siapa menjawab e-mel ini dalam {hours} jam:",
+    "Due soon or overdue": "Hampir tamat tempoh atau sudah lewat",
+    "What the AI did": "Apa yang AI lakukan",
+    "{count} emails are not sorted yet: the mailbox reached its limit of {limit} an hour. They are sorted as the limit allows.": "{count} e-mel belum diisih: peti mel mencapai hadnya iaitu {limit} sejam. E-mel itu diisih apabila had membenarkan.",
+    "{count} emails, {needs} need a person, {waiting} waiting for a reply.": "{count} e-mel, {needs} perlukan seseorang, {waiting} menunggu balasan.",
+    "Mail digest: {mailbox}, {date}": "Ringkasan mel: {mailbox}, {date}",
+    "Emails by kind": "E-mel mengikut jenis",
+    "Kind": "Jenis",
+    "Emails": "E-mel",
+    "Mail digest for {mailbox}": "Ringkasan mel untuk {mailbox}",
+    "An email in {mailbox} is waiting for a reply": "Satu e-mel dalam {mailbox} menunggu balasan",
+    "Nobody answered this in {hours} hours: {subject} (from {sender}).": "Tiada siapa menjawab ini dalam {hours} jam: {subject} (daripada {sender}).",
+    "Invoices": "Invois",
+    "Customer requests": "Permintaan pelanggan",
+    "Tenders": "Tender",
+    "Complaints": "Aduan",
+    "Internal": "Dalaman",
+    "Newsletters": "Surat berita",
+    "Other": "Lain-lain",
+    "Not sorted yet": "Belum diisih",
+    # ------------------------------------------------------------ P35 customers, deals, money
+    # Terms as in the app (web i18n/ms/crm.ts): customer = pelanggan, supplier = pembekal,
+    # deal = urusan jualan, invoice = invois, bill = bil, overdue = tertunggak, void = batal.
+    "Log a call, meeting or email": "Rekod panggilan, mesyuarat atau e-mel",
+    "Aging report": "Laporan umur hutang",
+    "Cash-flow forecast": "Ramalan aliran tunai",
+    "Pick the company this is for.": "Pilih syarikat untuk ini.",
+    "This file is held back for review, so it cannot be read.": (
+        "Fail ini ditahan untuk semakan, jadi tidak boleh dibaca."
+    ),
+    "Set the amount before approving.": "Tetapkan jumlah sebelum meluluskan.",
+    "Approved by {name}.": "Diluluskan oleh {name}.",
+    "Voided: {reason}": "Dibatalkan: {reason}",
+    "{number} voided: {reason}": "{number} dibatalkan: {reason}",
+    "Column {letter}": "Lajur {letter}",
+    "Unknown columns: {names}": "Lajur tidak dikenali: {names}",
+    "Pick the column that holds the name.": "Pilih lajur yang mengandungi nama.",
+    "You cannot change this company's customers.": (
+        "Anda tidak boleh mengubah pelanggan syarikat ini."
+    ),
+    "That person is not a member.": "Orang itu bukan ahli.",
+    "Not a valid email address": "Bukan alamat e-mel yang sah",
+    "Only people who manage agents or the organisation can archive customers.": (
+        "Hanya orang yang mengurus ejen atau organisasi boleh mengarkibkan pelanggan."
+    ),
+    "No text could be read from {name}.": "Tiada teks yang dapat dibaca daripada {name}.",
+    "Email to {mailbox}: {subject}": "E-mel ke {mailbox}: {subject}",
+    "An email reached {person}'s Outlook": "Satu e-mel sampai ke Outlook {person}",
+    "Sir/Madam": "Tuan/Puan",
+    "The mailbox could not make the draft: {error}": "Peti mel tidak dapat membuat draf: {error}",
+    "No company mailbox could hold this reminder. Send it from the company's email, then mark this task done.": (
+        "Tiada peti mel syarikat untuk peringatan ini. Hantar dari e-mel syarikat, kemudian "
+        "tanda tugasan ini selesai."
+    ),
+    "Each day must be between -60 and 365.": "Setiap hari mesti antara -60 dan 365.",
+    "The amount must be more than zero.": "Jumlah mesti lebih daripada sifar.",
+    "That is more than the {amount} still owed.": "Itu lebih daripada baki {amount} yang belum dibayar.",
+    "Paid in full.": "Dibayar sepenuhnya.",
+    # "This was already {status}." and timeline lines take these.
+    "draft|money status": "draf",
+    "approved|money status": "diluluskan",
+    "sent|money status": "dihantar",
+    "paid|money status": "dibayar",
+    "void|money status": "dibatalkan",
+    "lead|deal stage": "prospek",
+    "qualified|deal stage": "layak",
+    "proposal|deal stage": "cadangan",
+    "won|deal stage": "berjaya",
+    "lost|deal stage": "terlepas",
+    # ------------------------------------------------------------ P36 allowance, work scope, routines
+    "Only a manager can give more AI budget or allowance.": (
+        "Hanya pengurus boleh beri lebih bajet atau elaun AI."
+    ),
+    "That looks outside your work here, so I will not do it. I am for your work at the company: its customers, documents, procedures and your own tasks. If it is for work, say how it connects to your job and ask again.": (
+        "Itu nampaknya di luar kerja anda di sini, jadi saya tidak akan buat. Saya untuk kerja "
+        "anda di syarikat: pelanggannya, dokumen, prosedur dan tugasan anda sendiri. Jika ia "
+        "untuk kerja, terangkan kaitannya dengan tugas anda dan tanya semula."
+    ),
+    "Your AI allowance for today is used up ({used} of {limit} tokens). It resets at midnight, or a manager can give you more.": (
+        "Elaun AI anda untuk hari ini sudah habis ({used} daripada {limit} token). Ia diset "
+        "semula pada tengah malam, atau pengurus boleh beri lebih."
+    ),
+    "That looks outside your work here, so it was not started. If it is for work, say how it connects to your job.": (
+        "Itu nampaknya di luar kerja anda di sini, jadi ia tidak dimulakan. Jika ia untuk "
+        "kerja, terangkan kaitannya dengan tugas anda."
+    ),
+    "You cannot change your own AI allowance. Ask an owner or admin.": (
+        "Anda tidak boleh menukar elaun AI anda sendiri. Minta pemilik atau admin."
+    ),
+    "There is no role called {role}.": "Tiada peranan bernama {role}.",
+    "Only managers can change the office's shared pages.": (
+        "Hanya pengurus boleh menukar halaman kongsi pejabat."
+    ),
+    "Only managers can restrict who reads a document.": (
+        "Hanya pengurus boleh mengehadkan siapa yang membaca dokumen."
+    ),
+    "That routine is not here.": "Rutin itu tiada di sini.",
+    "This routine is {status} already.": "Rutin ini sudah {status}.",
+    "Only managers can change routines.": "Hanya pengurus boleh menukar rutin.",
+    # P96: what an agent learned to do without the AI engine
+    "Only someone who manages this agent can do that.": (
+        "Hanya orang yang mengurus ejen ini boleh berbuat begitu."
+    ),
+    "Only managers can forget an office routine.": "Hanya pengurus boleh melupakan rutin pejabat.",
+    "This login was saved with another key and cannot be read here. Enter both the username and the password to replace it.": (
+        "Log masuk ini disimpan dengan kunci lain dan tidak boleh dibaca di sini. Masukkan nama "
+        "pengguna dan kata laluan untuk menggantikannya."
+    ),
+    # ------------------------------------------------------------ P38 a stuck/failed task: notify, stop, finish, retry
+    "Task failed: {title}": "Tugasan gagal: {title}",
+    "{agent} could not finish it: {why}. Open it to retry, try another AI or agent, or finish it yourself.": (
+        "{agent} tidak dapat menyiapkannya: {why}. Buka untuk cuba semula, cuba AI atau ejen lain, "
+        "atau selesaikannya sendiri."
+    ),
+    "Only the person who gave this task or a manager of its agent can do this.": (
+        "Hanya orang yang memberi tugasan ini atau pengurus ejennya boleh melakukan ini."
+    ),
+    "This task is not running.": "Tugasan ini tidak sedang berjalan.",
+    "The worker service is not reachable, so the run could not be stopped. Try again in a moment.": (
+        "Perkhidmatan pekerja tidak dapat dihubungi, jadi larian tidak dapat dihentikan. Cuba lagi "
+        "sebentar nanti."
+    ),
+    "This task is finished.": "Tugasan ini sudah selesai.",
+    "Pick an AI group that has models.": "Pilih kumpulan AI yang mempunyai model.",
+    "Pick an agent.": "Pilih seorang ejen.",
+    # ------------------------------------------------------------ P42 reaching a computer from the web
+    "Remote {level} is off on the computer itself. On it, run: agentic-pc remote {level}": (
+        "Remote {level} dimatikan pada komputer itu sendiri. Padanya, jalankan: agentic-pc remote {level}"
+    ),
+    "Turn on remote {level} for this computer first (My computers).": (
+        "Hidupkan remote {level} untuk komputer ini dahulu (Komputer saya)."
+    ),
+    "Enter your password to allow seeing or using this computer from the web.": (
+        "Masukkan kata laluan anda untuk membenarkan melihat atau menggunakan komputer ini dari web."
+    ),
+    "Say where to point.": "Nyatakan ke mana hendak menuding.",
+    "Say what to type.": "Nyatakan apa hendak ditaip.",
+    # ------------------------------------------------------------ P40 file storage
+    "This kind of storage does not take {field}.": "Storan jenis ini tidak menerima {field}.",
+    "Pick the company whose Library these documents are for.": (
+        "Pilih syarikat yang Perpustakaannya dokumen-dokumen ini ditujukan."
+    ),
+    "That storage is not here.": "Storan itu tiada di sini.",
+    # ------------------------------------------------------------ P43 receipts and bills from photos and phones
+    "That person is not here.": "Orang itu tiada di sini.",
+    "That file is too large. Send a file up to 15 MB.": "Fail itu terlalu besar. Hantar fail sehingga 15 MB.",
+    "The file could not be downloaded. Send it again.": "Fail itu tidak dapat dimuat turun. Hantar semula.",
+    "I can take photos and PDF files. Send the receipt as a photo or PDF.": (
+        "Saya boleh terima gambar dan fail PDF. Hantar resit sebagai gambar atau PDF."
+    ),
+    "That is a lot of files for one day. Upload the rest on the web.": (
+        "Banyak fail untuk sehari. Muat naik selebihnya di web."
+    ),
+    "Saved {name} in your workspace, in {folder}. Send it again with a note to tell me what to do with it.": (
+        "{name} disimpan di meja kerja anda, dalam {folder}. Hantar semula dengan nota untuk "
+        "beritahu saya apa perlu dibuat dengannya."
+    ),
+    "{name} could not be read: the picture is unclear, or no AI model that reads pictures is set up (AI Engine > Vision).": (
+        "{name} tidak dapat dibaca: gambarnya kabur, atau belum ada model AI yang membaca gambar "
+        "(Enjin AI > Penglihatan)."
+    ),
+    "{name} is held for a security check. Release it first.": (
+        "{name} ditahan untuk semakan keselamatan. Lepaskannya dahulu."
+    ),
+    "(possible duplicate of {other})": "(mungkin sama dengan {other})",
+    "Approved by {name}: {why}": "Diluluskan oleh {name}: {why}",
+    # ------------------------------------------------------------ P44 inbox rules
+    "Connect your Outlook first (My AI or My assistants).": (
+        "Sambungkan Outlook anda dahulu (AI saya atau Pembantu saya)."
+    ),
+    "That rule is not here.": "Peraturan itu tiada di sini.",
+    "A mailbox can have up to {n} rules.": "Satu peti mel boleh ada sehingga {n} peraturan.",
+    # ------------------------------------------------------------ P45 what the AI team learned
+    "This week the AI team finished {done} tasks, learned {facts} facts and {lessons} lessons, proposed {skills} skills and learned {routines} routines. Routines ran {runs} times and saved about {saved} tokens.": (
+        "Minggu ini pasukan AI menyiapkan {done} tugasan, belajar {facts} fakta dan {lessons} "
+        "pengajaran, mencadangkan {skills} kemahiran dan belajar {routines} rutin. Rutin berjalan "
+        "{runs} kali dan menjimatkan kira-kira {saved} token."
+    ),
+    "{n} routines are still learning. Trust the good ones on the Learning page so they start saving tokens now.": (
+        "{n} rutin masih belajar. Percayai yang baik di halaman Pembelajaran supaya ia mula "
+        "menjimatkan token sekarang."
+    ),
+    "{n} skill proposals wait for a decision.": "{n} cadangan kemahiran menunggu keputusan.",
+    # P92: lessons people teach the agents
+    "That lesson is not here.": "Pengajaran itu tiada di sini.",
+    "Only managers can change what the whole office remembers. Ask your manager.": (
+        "Hanya pengurus boleh mengubah apa yang diingati seluruh pejabat. Minta pengurus anda."
+    ),
+    "This lesson is not in use.": "Pengajaran ini tidak digunakan.",
+    "Only the person who taught this lesson, or an owner or admin, can undo it.": (
+        "Hanya orang yang mengajar pengajaran ini, atau pemilik atau pentadbir, boleh "
+        "membatalkannya."
+    ),
+    "Write the lesson as one short sentence, with no passwords, codes or other secrets.": (
+        "Tulis pengajaran sebagai satu ayat pendek, tanpa kata laluan, kod atau rahsia lain."
+    ),
+    "{n} lessons had to be taught more than once. See them on the Learning page under Lessons.": (
+        "{n} pengajaran terpaksa diajar lebih daripada sekali. Lihat di halaman Pembelajaran, "
+        "bahagian Pengajaran."
+    ),
+    "What the AI team learned: week of {date}": "Apa yang dipelajari pasukan AI: minggu {date}",
+    "Per agent": "Setiap ejen",
+    "Agent": "Ejen",
+    "Tasks done": "Tugasan siap",
+    "Facts": "Fakta",
+    "Lessons": "Pengajaran",
+    "Skills proposed": "Kemahiran dicadangkan",
+    "Routines learned": "Rutin dipelajari",
+    "Routine runs": "Larian rutin",
+    "Tokens saved": "Token dijimatkan",
+    "What the AI team learned last week": "Apa yang dipelajari pasukan AI minggu lepas",
+    "See what each agent learned, and trust the routines that are ready.": (
+        "Lihat apa yang dipelajari setiap ejen, dan percayai rutin yang sudah sedia."
+    ),
+    # ------------------------------------------------------------ P46 approval limits
+    "under the RM {max} limit, from a supplier approved before": (
+        "di bawah had RM {max}, daripada pembekal yang pernah diluluskan"
+    ),
+    # ------------------------------------------------------------ P47 the working day
+    "{name} finished {done} tasks today. {failed} failed, {blocked} wait for a person and {asking} approvals are open.": (
+        "{name} menyiapkan {done} tugasan hari ini. {failed} gagal, {blocked} menunggu seseorang "
+        "dan {asking} kelulusan masih terbuka."
+    ),
+    "{name}'s day: {date}": "Hari {name}: {date}",
+    "Finished today": "Siap hari ini",
+    "Task": "Tugasan",
+    "Finished": "Siap",
+    "{name}'s day": "Hari {name}",
+    "{n} files are kept in this storage. Turn off its import and keep it until they are moved or deleted.": (
+        "{n} fail disimpan dalam storan ini. Matikan importnya dan simpan ia sehingga fail itu "
+        "dipindahkan atau dipadam."
+    ),
+    # ------------------------------------------------------------ P49 help, P50 the CRM
+    "No AI model could answer right now. The guide has every page explained.": (
+        "Tiada model AI dapat menjawab sekarang. Panduan menerangkan setiap halaman."
+    ),
+    "You can look at this but not change it.": "Anda boleh melihat ini tetapi tidak boleh mengubahnya.",
+    "There is no such template.": "Templat itu tiada.",
+    "That field is not on this object.": "Medan itu tiada pada senarai ini.",
+    "An object can have up to {n} fields.": "Satu senarai boleh mempunyai sehingga {n} medan.",
+    "Pick what it links to.": "Pilih apa yang dipautkannya.",
+    "That field is not here.": "Medan itu tiada di sini.",
+    "This comes from the office's own data; hide it instead.": (
+        "Ini datang daripada data pejabat sendiri; sembunyikan sahaja."
+    ),
+    "This is the name of each record; pick another one first.": (
+        "Ini nama setiap rekod; pilih medan lain dahulu."
+    ),
+    "That record is not here.": "Rekod itu tiada di sini.",
+    "Remove these on their own page.": "Buang ini di halamannya sendiri.",
+    "That view is not here.": "Paparan itu tiada di sini.",
+    "Pick what the tile counts.": "Pilih apa yang dikira oleh jubin ini.",
+    "Pick count, total or average.": "Pilih bilangan, jumlah atau purata.",
+    "A dashboard can hold up to {n} tiles.": "Papan pemuka boleh memuatkan sehingga {n} jubin.",
+    "That tile is not here.": "Jubin itu tiada di sini.",
+    "That connection is not here.": "Sambungan itu tiada di sini.",
+    "This one is sent records by the other system; nothing to fetch.": (
+        "Sambungan ini menerima rekod yang dihantar oleh sistem lain; tiada apa untuk diambil."
+    ),
+    "Not found.": "Tidak dijumpai.",
+    "Send at most 2 MB at a time.": "Hantar paling banyak 2 MB pada satu masa.",
+    "Send JSON.": "Hantar JSON.",
+    "Use a number.": "Gunakan nombor.",
+    "Use a date like 2026-10-27.": "Gunakan tarikh seperti 2026-10-27.",
+    "Use a date and time like 2026-10-27 14:30.": "Gunakan tarikh dan masa seperti 2026-10-27 14:30.",
+    "Use a phone number, like +60 12-345 6789.": "Gunakan nombor telefon, seperti +60 12-345 6789.",
+    "Use an email address.": "Gunakan alamat e-mel.",
+    "Use a web address, like https://example.com.": "Gunakan alamat web, seperti https://example.com.",
+    "Use 0 to {top}.": "Gunakan 0 hingga {top}.",
+    '"{value}" is not one of the choices.': '"{value}" bukan salah satu pilihan.',
+    "This is needed.": "Ini diperlukan.",
+    "{field}: {why}": "{field}: {why}",
+    "That is not something the office keeps.": "Itu bukan sesuatu yang disimpan oleh pejabat.",
+    # ------------------------------------------------------------ P51 safeguards
+    "The worker service is not reachable, so the run could not be stopped. Try again in a moment, or end it anyway.": (
+        "Perkhidmatan pekerja tidak dapat dihubungi, jadi larian tidak dapat dihentikan. Cuba "
+        "lagi sebentar lagi, atau tamatkan juga."
+    ),
+    "The office's AI work that nobody asked for directly (mail rules, follow-ups) used today's limit ({used} of {limit} tokens). It resets at midnight, or a manager can give more.": (
+        "Kerja AI pejabat yang tidak diminta terus oleh sesiapa (peraturan e-mel, susulan) telah "
+        "mencapai had hari ini ({used} daripada {limit} token). Ia ditetapkan semula pada tengah "
+        "malam, atau pengurus boleh beri lebih."
+    ),
+    # ------------------------------------------------------------ P52 Microsoft 365 and Teams
+    "Connect your Microsoft 365 account first.": "Sambungkan akaun Microsoft 365 anda dahulu.",
+    "Reconnect Microsoft 365 once to allow Teams.": "Sambung semula Microsoft 365 sekali untuk membenarkan Teams.",
+    "Chat": "Sembang",
+    "List Teams chats": "Senaraikan sembang Teams",
+    "Read a Teams chat": "Baca sembang Teams",
+    "Send a Teams message": "Hantar mesej Teams",
+    # ------------------------------------------------------------ P102 Teams and Outlook drafts
+    "Draft a Teams message": "Draf mesej Teams",
+    "Draft an Outlook forward": "Draf e-mel majuan Outlook",
+    "{name} drafted a Teams message": "{name} sudah mendraf mesej Teams",
+    "To {to} in Teams:\n\n{preview}\n\nApprove to send it.": (
+        "Kepada {to} dalam Teams:\n\n{preview}\n\nLuluskan untuk menghantarnya."
+    ),
+    "Starting a new Teams chat is not allowed yet. Press Allow new Teams chats on Microsoft 365 > Teams, then send it again.": (  # noqa: E501
+        "Memulakan sembang Teams baharu belum dibenarkan. Tekan Benarkan sembang Teams baharu di "
+        "Microsoft 365 > Teams, kemudian hantar semula."
+    ),
+    "Teams did not allow this message. Reconnect Microsoft 365, then try again.": (
+        "Teams tidak membenarkan mesej ini. Sambung semula Microsoft 365, kemudian cuba lagi."
+    ),
+    "No one with the address {to} was found in your organisation's Teams.": (
+        "Tiada sesiapa dengan alamat {to} dalam Teams organisasi anda."
+    ),
+    "That Teams chat was not found. It may have been deleted.": (
+        "Sembang Teams itu tidak dijumpai. Mungkin ia sudah dipadam."
+    ),
+    "A Teams message is sent only from its own person's Teams.": (
+        "Mesej Teams hanya dihantar daripada Teams pemiliknya sendiri."
+    ),
+    "Microsoft did not start the Teams chat.": "Microsoft tidak memulakan sembang Teams itu.",
+    "Starting new Teams chats was not allowed. Your Microsoft 365 admin can allow Chat.Create for this app (Azure portal > App registrations > API permissions). Your mail and Teams replies keep working.": (  # noqa: E501
+        "Memulakan sembang Teams baharu tidak dibenarkan. Pentadbir Microsoft 365 anda boleh "
+        "membenarkan Chat.Create untuk aplikasi ini (portal Azure > App registrations > API "
+        "permissions). E-mel dan balasan Teams anda terus berfungsi."
+    ),
+    # ------------------------------------------------------------ P63 Teams channel posts
+    "List Teams channels": "Senaraikan saluran Teams",
+    "Read a Teams channel": "Baca saluran Teams",
+    "That channel was not found.": "Saluran itu tidak dijumpai.",
+    "Reading Teams channel posts needs your Microsoft 365 admin to turn it on (Channels > Microsoft 365), then reconnect Microsoft.": (
+        "Membaca mesej saluran Teams memerlukan pentadbir Microsoft 365 anda menghidupkannya "
+        "(Saluran > Microsoft 365), kemudian sambung semula Microsoft."
+    ),
+    # ------------------------------------------------------------ P52 security audit fixes
+    "Only an owner or admin can change the built-in templates. Make a copy to edit.": (
+        "Hanya pemilik atau pentadbir boleh mengubah templat terbina dalam. Buat salinan untuk "
+        "diubah."
+    ),
+    "Only a manager can open up a restricted document to everyone.": (
+        "Hanya pengurus boleh membuka dokumen terhad kepada semua orang."
+    ),
+    "Pick a team agent of that company (not a personal assistant or AI twin).": (
+        "Pilih ejen pasukan syarikat itu (bukan pembantu peribadi atau kembar AI)."
+    ),
+    "Changing the address needs the password or key typed again.": (
+        "Menukar alamat memerlukan kata laluan atau kunci ditaip semula."
+    ),
+    "Only the person this AI belongs to can set or change its instructions.": (
+        "Hanya orang yang memiliki AI ini boleh menetapkan atau mengubah arahannya."
+    ),
+    "A sub-task of this work is still open. Cancel it first, or delete with “also cancel its open sub-tasks”.": (
+        "Sub-tugasan kerja ini masih terbuka. Batalkannya dahulu, atau padam dengan “batal juga "
+        "sub-tugasan yang masih terbuka”."
+    ),
+    "Only the person this AI belongs to can change or run its schedules.": (
+        "Hanya orang yang memiliki AI ini boleh mengubah atau menjalankan jadualnya."
+    ),
+    "Changing the sites needs the password typed again.": (
+        "Menukar laman memerlukan kata laluan ditaip semula."
+    ),
+    "You can change only the workflows you made. Ask a manager for this one.": (
+        "Anda hanya boleh mengubah aliran kerja yang anda buat. Minta pengurus untuk yang ini."
+    ),
+    # ------------------------------------------------------------ P53 staff computers
+    "Your role ({role}) cannot oversee staff computers.": (
+        "Peranan anda ({role}) tidak boleh menyelia komputer staf."
+    ),
+    "Only the owner sets up backup.": "Hanya pemilik yang menyediakan sandaran.",
+    "Choose where to keep the backup first (Settings > Storage).": (
+        "Pilih tempat untuk menyimpan sandaran dahulu (Tetapan > Storan)."
+    ),
+    # ------------------------------------------------------------ P57 export and erase a workspace
+    "Only an owner can export or erase this workspace's data.": (
+        "Hanya pemilik boleh mengeksport atau memadam data ruang kerja ini."
+    ),
+    "Your password is not right.": "Kata laluan anda tidak betul.",
+    "Enter the code from your authenticator app.": "Masukkan kod daripada aplikasi pengesah anda.",
+    "Type the workspace's name exactly as shown to confirm.": (
+        "Taip nama ruang kerja tepat seperti yang ditunjukkan untuk mengesahkan."
+    ),
+    "An export is already being made.": "Satu eksport sedang dibuat.",
+    "The background job engine is not reachable. Try again in a minute.": (
+        "Enjin kerja latar tidak dapat dihubungi. Cuba lagi sebentar nanti."
+    ),
+    "That export was not found.": "Eksport itu tidak dijumpai.",
+    "This download link has expired. Open Data and privacy again for a new one.": (
+        "Pautan muat turun ini sudah tamat. Buka Data dan privasi semula untuk pautan baharu."
+    ),
+    "This export was already downloaded or has expired. Make a new one.": (
+        "Eksport ini sudah dimuat turun atau sudah tamat. Buat yang baharu."
+    ),
+    "An erase of this workspace is already open.": (
+        "Permintaan memadam ruang kerja ini sudah dibuka."
+    ),
+    "That erase request was not found.": "Permintaan memadam itu tidak dijumpai.",
+    "The erase has started and cannot be stopped.": (
+        "Pemadaman sudah bermula dan tidak boleh dihentikan."
+    ),
+    "This erase request is not open.": "Permintaan memadam ini tidak terbuka.",
+    "The certificate is not ready yet.": "Sijil belum siap.",
+    "Only a failed erase can be tried again.": ("Hanya pemadaman yang gagal boleh dicuba semula."),
+    # ------------------------------------------------------------ P61 Library: folders, labels (api/routers/company_files, files)
+    "Give the folder a name.": "Beri folder itu nama.",
+    "That folder already exists.": "Folder itu sudah ada.",
+    "A folder cannot be moved into itself.": "Folder tidak boleh dipindahkan ke dalam dirinya sendiri.",
+    "This folder cannot be renamed or moved.": "Folder ini tidak boleh dinamakan semula atau dipindahkan.",
+    "That folder is not here.": "Folder itu tiada di sini.",
+    "That folder path is too long.": "Laluan folder itu terlalu panjang.",
+    "This folder still has files.": "Folder ini masih ada fail.",
+    "A label is 1 to {n} characters.": "Label mesti 1 hingga {n} aksara.",
+    "A file can have up to {n} labels.": "Satu fail boleh ada sehingga {n} label.",
+    # ------------------------------------------------------------ P65 Prima Secure knowledge pack (api/routers/library)
+    "The Prima Secure pack is not on this server.": "Pek Prima Secure tiada di pelayan ini.",
+    # ------------------------------------------------------------ P66 Prima through the office (agentic/prima)
+    "Prima did not open for this account.": "Prima tidak dibuka untuk akaun ini.",
+    "Prima is not set up on this server.": "Prima belum disediakan di pelayan ini.",
+    "Prima only reads (GET) and records (POST).": "Prima hanya membaca (GET) dan merekod (POST).",
+    "That is too large for Prima (3 MB at most).": "Itu terlalu besar untuk Prima (paling banyak 3 MB).",
+    "Prima is not answering right now. Try again in a minute.": (
+        "Prima tidak menjawab sekarang. Cuba lagi dalam seminit."
+    ),
+    "That is not a Prima address.": "Itu bukan alamat Prima.",
+    "That part of Prima is not opened through the office.": (
+        "Bahagian Prima itu tidak dibuka melalui pejabat."
+    ),
+    "Prima knows people by their Microsoft work account. Sign out, then use Sign in with Microsoft once, and open Prima again.": (  # noqa: E501
+        "Prima mengenali orang melalui akaun kerja Microsoft mereka. Log keluar, kemudian guna "
+        "Log masuk dengan Microsoft sekali, dan buka Prima semula."
+    ),
+    "Find a Prima action": "Cari tindakan Prima",
+    "Read from Prima": "Baca daripada Prima",
+    "Record in Prima": "Rekod dalam Prima",
+    # ------------------------------------------------------------ P67 who is who in Prima
+    "You are not linked to your Prima staff record yet. The office owner links people on the Prima page.": (  # noqa: E501
+        "Anda belum dipautkan kepada rekod staf Prima anda. Pemilik pejabat memautkan orang di "
+        "halaman Prima."
+    ),
+    "That person is not in this office.": "Orang itu tiada dalam pejabat ini.",
+    "That Prima record is already linked to someone else in the office.": (
+        "Rekod Prima itu sudah dipautkan kepada orang lain dalam pejabat."
+    ),
+    "That Prima record does not exist.": "Rekod Prima itu tidak wujud.",
+    "Connect your Microsoft work account to the office to open Prima. It takes one sign-in with Microsoft.": (  # noqa: E501
+        "Sambungkan akaun kerja Microsoft anda ke pejabat untuk membuka Prima. Ia hanya perlu "
+        "satu log masuk dengan Microsoft."
+    ),
+    # ------------------------------------------------------------ P75 automatic Prima accounts
+    "Prima could not make your account. Ask the office owner to check it.": (
+        "Prima tidak dapat membuat akaun anda. Minta pemilik pejabat menyemaknya."
+    ),
+    "Prima does not know which company you work in yet. Ask the office owner to give you a branch.": (  # noqa: E501
+        "Prima belum tahu syarikat tempat anda bekerja. Minta pemilik pejabat memberi anda "
+        "cawangan."
+    ),
+    'Prima does not know which company {branch} is yet. The office owner sets "which Prima company {branch} is" on the Prima page.': (  # noqa: E501
+        "Prima belum tahu {branch} ialah syarikat yang mana. Pemilik pejabat menetapkan "
+        '"syarikat Prima yang mana {branch}" di halaman Prima.'
+    ),
+    "That branch is not in this office.": "Cawangan itu tiada dalam pejabat ini.",
+    "That Prima company does not exist.": "Syarikat Prima itu tidak wujud.",
+    # ------------------------------------------------------------ P82 members table, owners in Prima
+    "Show 25, 50 or 100 a page.": "Tunjukkan 25, 50 atau 100 setiap halaman.",
+    "Owners open Prima as its top record. They need no link of their own.": (
+        "Pemilik membuka Prima sebagai rekod teratasnya. Mereka tidak perlu dipautkan."
+    ),
+    # ------------------------------------------------------------ P92 roles and access, names and emails
+    "You cannot give or change a role that has more access than your own.": (
+        "Anda tidak boleh memberi atau menukar peranan yang mempunyai akses lebih daripada anda."
+    ),
+    "Nothing to change.": "Tiada apa untuk ditukar.",
+    "Your role ({role}) cannot change names or emails.": (
+        "Peranan anda ({role}) tidak boleh menukar nama atau emel."
+    ),
+    "Change your own name or email in Settings.": "Tukar nama atau emel anda sendiri di Tetapan.",
+    "Type a name.": "Taip nama.",
+    "This person is also in another workspace, so their name and email are not changed from here.": (  # noqa: E501
+        "Orang ini juga berada dalam ruang kerja lain, jadi nama dan emel mereka tidak ditukar "
+        "dari sini."
+    ),
+    "{email} already belongs to another account.": "{email} sudah digunakan oleh akaun lain.",
+    "Only an owner can change what each role may do.": (
+        "Hanya pemilik boleh menukar apa yang boleh dibuat oleh setiap peranan."
+    ),
+    "The owner role always has everything. It cannot be changed.": (
+        "Peranan pemilik sentiasa ada semuanya. Ia tidak boleh ditukar."
+    ),
+    "Only an owner can ever do that ({permission}).": (
+        "Hanya pemilik boleh membuat perkara itu ({permission})."
+    ),
+    "Everyone in the workspace can sign in and read. That cannot be taken away.": (
+        "Semua orang dalam ruang kerja boleh log masuk dan membaca. Itu tidak boleh ditarik balik."
+    ),
+    "There is no permission called {permission}.": "Tiada kebenaran bernama {permission}.",
+    "A permission cannot be both given and taken away.": (
+        "Satu kebenaran tidak boleh diberi dan ditarik balik serentak."
+    ),
+    "Ask an owner or admin to correct your email on the Members page.": (
+        "Minta pemilik atau admin membetulkan emel anda di halaman Ahli."
+    ),
+    "Type your current password (or sign in with Microsoft again first).": (
+        "Taip kata laluan semasa anda (atau log masuk dengan Microsoft sekali lagi dahulu)."
+    ),
+}
+
+# P92: emailed sign-in passwords and the system sender, kept in their own file.
+from .ms_signin import MS_SIGNIN  # noqa: E402
+
+MS.update({k: v for k, v in MS_SIGNIN.items() if k not in MS})
+
+# P97: heads of department, who reports to whom, tasks for people.
+from .ms_team import MS_TEAM  # noqa: E402
+
+MS.update({k: v for k, v in MS_TEAM.items() if k not in MS})
+
+# P98: a member in several branches at once.
+from .ms_branches import MS_BRANCHES  # noqa: E402
+
+MS.update({k: v for k, v in MS_BRANCHES.items() if k not in MS})
+
+# P99: the office and Prima, or Prima only; and the Prima screens chosen for a member.
+from .ms_access import MS_ACCESS  # noqa: E402
+
+MS.update({k: v for k, v in MS_ACCESS.items() if k not in MS})
+
+# P109: tasks for people, Trello-like (assignees, watchers, checklist, sub-tasks).
+from .ms_tasks import MS_TASKS  # noqa: E402
+
+MS.update({k: v for k, v in MS_TASKS.items() if k not in MS})
+
+# P109: the Microsoft 365 page and other email accounts with their attachment backups.
+from .ms_m365 import MS_M365  # noqa: E402
+
+MS.update({k: v for k, v in MS_M365.items() if k not in MS})
+
+# P109: heads of several departments, the Library by department, files for other companies,
+# comments on feedback.
+from .ms_org import MS_ORG  # noqa: E402
+
+MS.update({k: v for k, v in MS_ORG.items() if k not in MS})
+
+# P111: the organization chart (who reports to whom, job titles).
+from .ms_hierarchy import MS_HIERARCHY  # noqa: E402
+
+MS.update({k: v for k, v in MS_HIERARCHY.items() if k not in MS})
+
+# P111: organization names in capitals; every organization in Prima too.
+from .ms_prima_org import MS_PRIMA_ORG  # noqa: E402
+
+MS.update({k: v for k, v in MS_PRIMA_ORG.items() if k not in MS})
+
+# P112: a Prima person and the office's members (who they are here, or add them).
+from .ms_prima_members import MS_PRIMA_MEMBERS  # noqa: E402
+
+MS.update({k: v for k, v in MS_PRIMA_MEMBERS.items() if k not in MS})
+
+# P113: AI usage per user (the developer's report).
+from .ms_ai_usage import MS_AI_USAGE  # noqa: E402
+
+MS.update({k: v for k, v in MS_AI_USAGE.items() if k not in MS})
+
+# P114: AI allowance gifts, paused tasks and each person's notifications.
+from .ms_notify import MS_NOTIFY  # noqa: E402
+
+MS.update({k: v for k, v in MS_NOTIFY.items() if k not in MS})
+
+# My Agentic: the Inbox, SMTP sending and the WhatsApp page (i18n/ms_mine.py).
+from .ms_mine import MS_MINE  # noqa: E402
+
+MS.update({k: v for k, v in MS_MINE.items() if k not in MS})

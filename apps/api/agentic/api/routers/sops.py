@@ -1,0 +1,218 @@
+"""SOPs: the written procedures agents follow. Versioned on every edit.
+
+P24: an SOP the AI wrote from uploaded documents starts as a "draft". Agents never see a
+draft (prompt, find_sop, library search); a person with org.manage approves it by setting
+status to "active" (audited as sop.approved).
+"""
+
+import logging
+
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import ColumnElement, and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...core.db import get_db
+from ...core.security import can
+from ...intake.builders import file_names
+from ...knowledge import indexer
+from ...models import SOP, Agent, Branch, Department
+from ...services import audit
+from ..agent_schemas import SOPIn, SOPOut, SOPUpdateIn
+from ..deps import Principal, api_error, require
+
+router = APIRouter(prefix="/api/sops", tags=["sops"])
+log = logging.getLogger("agentic.api.sops")
+
+
+async def _label(db: AsyncSession, s: SOP) -> str:
+    if s.scope == "workspace":
+        return "Every company"
+    if s.scope == "library":
+        return "Library (attach to agents)"
+    if s.scope == "branch" and s.scope_id:
+        b = await db.get(Branch, s.scope_id)
+        return f"{b.name}" if b else "Removed branch"
+    if s.scope == "department" and s.scope_id:
+        d = await db.get(Department, s.scope_id)
+        b = await db.get(Branch, d.branch_id) if d else None
+        return f"{d.name}, {b.name}" if d and b else "Removed department"
+    return s.scope
+
+
+async def _out(db: AsyncSession, s: SOP, names: dict[str, str] | None = None) -> SOPOut:
+    ids = list(s.source_file_ids or [])
+    if names is None:
+        names = await file_names(db, s.workspace_id, ids)
+    return SOPOut(
+        id=s.id,
+        scope=s.scope,
+        scope_id=s.scope_id,
+        scope_label=await _label(db, s),
+        title=s.title,
+        body=s.body,
+        version=s.version,
+        updated_by=s.updated_by,
+        updated_at=s.updated_at,
+        status=s.status,
+        source_file_ids=ids,
+        source_files=[{"id": i, "name": names[i]} for i in ids if i in names],
+        pack=s.pack_key.split(":", 1)[0] if s.pack_key else None,
+    )
+
+
+async def sop_out(db: AsyncSession, s: SOP) -> SOPOut:
+    return await _out(db, s)
+
+
+async def _index(db: AsyncSession, sop_id: str) -> None:
+    """Rebuild the SOP's library passages (P18). SOPs are short, so this runs right here."""
+    try:
+        await indexer.index_sop(db, sop_id)
+    except Exception:  # noqa: BLE001 - the SOP is saved; POST /api/library/reindex redoes it
+        await db.rollback()
+        log.warning("could not index SOP %s", sop_id, exc_info=True)
+
+
+async def _get(db: AsyncSession, ws: str, sop_id: str) -> SOP:
+    s = await db.get(SOP, sop_id)
+    if s is None or s.workspace_id != ws:
+        raise api_error(status.HTTP_404_NOT_FOUND, "sop_not_found", "That SOP is not here.")
+    return s
+
+
+def _own_sops(p: Principal) -> ColumnElement[bool]:
+    """P92: the SOPs someone outside the office view (staff) reads in the Library: the ones in
+    force for every company, the Library's, and their own company's and department's. Not
+    drafts the AI wrote, nor other companies' procedures."""
+    sc = p.scope
+    parts: list[ColumnElement[bool]] = [SOP.scope.in_(("workspace", "library"))]
+    if sc.branch_ids:
+        parts.append(and_(SOP.scope == "branch", sc.branch_col(SOP.scope_id)))
+    if sc.department_id:
+        parts.append(and_(SOP.scope == "department", SOP.scope_id == sc.department_id))
+    return and_(SOP.status == "active", or_(*parts))
+
+
+@router.get("")
+async def list_sops(
+    principal: Principal = Depends(require("read")), db: AsyncSession = Depends(get_db)
+) -> list[SOPOut]:
+    q = select(SOP).where(SOP.workspace_id == principal.workspace_id)
+    if not can(principal.role, "office.view"):
+        q = q.where(_own_sops(principal))
+    rows = (await db.scalars(q.order_by(SOP.scope, SOP.title))).all()
+    names = await file_names(
+        db, principal.workspace_id, [i for s in rows for i in (s.source_file_ids or [])]
+    )
+    return [await _out(db, s, names) for s in rows]
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_sop(
+    body: SOPIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> SOPOut:
+    if body.scope in ("branch", "department"):
+        model = Branch if body.scope == "branch" else Department
+        target = await db.get(model, body.scope_id or "")
+        if target is None or target.workspace_id != principal.workspace_id:
+            raise api_error(
+                status.HTTP_400_BAD_REQUEST,
+                "bad_scope",
+                "Pick a branch from this workspace."
+                if body.scope == "branch"
+                else "Pick a department from this workspace.",
+            )
+    s = SOP(
+        workspace_id=principal.workspace_id,
+        scope=body.scope,
+        scope_id=body.scope_id if body.scope in ("branch", "department") else None,
+        title=body.title.strip(),
+        body=body.body,
+        updated_by=principal.actor,
+        status=body.status,
+    )
+    db.add(s)
+    await db.flush()
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "sop.created",
+        target=s.id,
+        after={"title": s.title, "scope": s.scope, "status": s.status},
+    )
+    await db.commit()
+    await _index(db, s.id)
+    await db.refresh(s)
+    return await _out(db, s)
+
+
+@router.patch("/{sop_id}")
+async def update_sop(
+    sop_id: str,
+    body: SOPUpdateIn,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> SOPOut:
+    s = await _get(db, principal.workspace_id, sop_id)
+    before = {"title": s.title, "version": s.version, "status": s.status}
+    if body.title is not None:
+        s.title = body.title.strip()
+    if body.body is not None and body.body != s.body:
+        s.body = body.body
+        s.version += 1
+    s.updated_by = principal.actor
+    after = {"title": s.title, "version": s.version, "status": s.status}
+    if body.status is not None and body.status != s.status:
+        s.status = after["status"] = body.status
+        # Approving an AI draft is its own audit entry: from now on agents follow it.
+        await audit.record(
+            db,
+            principal.workspace_id,
+            principal.actor,
+            "sop.approved" if body.status == "active" else "sop.unpublished",
+            target=s.id,
+            before={"status": before["status"]},
+            after={"status": s.status, "title": s.title, "version": s.version},
+        )
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "sop.updated",
+        target=s.id,
+        before=before,
+        after=after,
+    )
+    await db.commit()
+    await _index(db, s.id)
+    await db.refresh(s)
+    return await _out(db, s)
+
+
+@router.delete("/{sop_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sop(
+    sop_id: str,
+    principal: Principal = Depends(require("org.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    s = await _get(db, principal.workspace_id, sop_id)
+    for a in (
+        await db.scalars(select(Agent).where(Agent.workspace_id == principal.workspace_id))
+    ).all():
+        if s.id in (a.sop_ids or []):
+            a.sop_ids = [x for x in a.sop_ids if x != s.id]
+    await db.delete(s)
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "sop.deleted",
+        target=sop_id,
+        before={"title": s.title},
+    )
+    await indexer.remove(db, "sop", sop_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

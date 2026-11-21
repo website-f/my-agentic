@@ -1,0 +1,516 @@
+/** "Link a computer": a one-time code, then either the desktop app (with pictures of the
+ * one-time "Run anyway" / "Open Anyway" step) or one command that installs and links in one
+ * paste. Both watch the code and turn into "Linked" the moment the PC claims it.
+ *
+ * P92: on Windows it is a short wizard for people who are not technical, in big text with
+ * pictures: 1 Download → 2 Open the file (More info → Run anyway) → 3 Waiting… → "Linked! Now
+ * press Allow on your computer". Opened on a phone, it says to open the same page on the
+ * Windows computer (the short address and the code, big). An expired code says so and gets a
+ * new one. `allowSite` (from the ePerolehan card) pre-selects "let my ePerolehan work run on
+ * this computer": the PC is asked for Allow as soon as it is linked (the Allow on the PC stays:
+ * it is the person's consent there). The other ways (Mac, Linux, one command) stay one tap away. */
+import {
+  AppleLogoIcon, ArrowClockwiseIcon, ArrowLeftIcon, CheckCircleIcon, CopyIcon, DesktopTowerIcon, DeviceMobileIcon, DownloadSimpleIcon,
+  FolderOpenIcon, HandPointingIcon, TerminalWindowIcon, TimerIcon, WindowsLogoIcon,
+} from "@phosphor-icons/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { ResponsiveDialog } from "@/components/ui/dialog";
+import { FormError } from "@/components/ui/field";
+import { Segmented } from "@/components/ui/segmented";
+import { SwitchField } from "@/components/ui/switch";
+import { t as tr, useT } from "@/i18n";
+import { errorMessage } from "@/lib/api";
+import {
+  countdown, createLinkCode, detectOs, deviceKeys, devicesQuery, linkStatus, prettyCode, secondsLeft, type DeviceOs, type LinkCode,
+} from "@/lib/devices";
+import { askMyPc, EPEROLEHAN_SITE } from "@/lib/my-pc";
+import { cn } from "@/lib/utils";
+
+import { AllowButtonPicture, MacGatekeeper, WindowsSmartScreen } from "./illustrations";
+
+export function copyText(text: string) {
+  const done = () => toast.success(tr("Copied."));
+  const blocked = () => toast.error(tr("Copy blocked by the browser."));
+  if (!navigator.clipboard) return blocked();
+  void navigator.clipboard.writeText(text).then(done, blocked);
+}
+
+const OS_LABEL: Record<DeviceOs, string> = { windows: "Windows", mac: "Mac", linux: "Linux" };
+
+function Steps({ items }: { items: ReactNode[] }) {
+  return (
+    <ol className="grid gap-2">
+      {items.map((it, i) => (
+        <li key={i} className="flex min-w-0 items-start gap-2.5 text-[13.5px]">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-[12px] font-semibold text-accent tabular">{i + 1}</span>
+          <span className="min-w-0 pt-0.5">{it}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The three steps of the wizard, numbered, the current one highlighted. */
+function StepBar({ step }: { step: 1 | 2 | 3 }) {
+  const t = useT();
+  const names = [t("Download"), t("Open the file"), t("Linked")];
+  return (
+    <ol aria-label={t("Steps")} className="grid grid-cols-3 gap-1.5">
+      {names.map((n, i) => {
+        const at = i + 1;
+        const on = at === step;
+        const done = at < step;
+        return (
+          <li key={n} aria-current={on ? "step" : undefined}
+            className={cn("flex min-w-0 items-center gap-1.5 rounded-sm border px-2 py-1.5 text-[12px] leading-tight font-medium sm:text-[12.5px]",
+              on ? "border-accent bg-accent-soft/60 text-accent" : done ? "border-ok/40 text-ok" : "border-border text-muted")}>
+            <span className={cn("grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold tabular",
+              on ? "bg-accent text-accent-fg" : done ? "bg-ok text-white" : "bg-surface-2")}>{done ? "✓" : at}</span>
+            <span className="min-w-0 break-words">{n}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function LinkDialog({ onClose, onLinked, allowSite }: {
+  onClose: () => void;
+  onLinked: (deviceId: string | null) => void;
+  /** P92: linking from the ePerolehan card: let that site's work run on this computer. */
+  allowSite?: string;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  // P92: the wizard (Windows), the other ways, and whether this is a phone.
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [other, setOther] = useState(false);
+  const [onPhone, setOnPhone] = useState(() => detectOs() === "other");
+  const [allow, setAllow] = useState(!!allowSite);
+  // The one line is the way in; the desktop app only once a build is published (P31).
+  const [pickedTab, setTab] = useState<"app" | "command" | null>(null);
+  const [os, setOs] = useState<DeviceOs>(() => {
+    const mine = detectOs();
+    return mine === "other" ? "windows" : mine;
+  });
+  const [now, setNow] = useState(() => Date.now());
+  const [remote, setRemote] = useState(false); // P42: allow seeing / using it from the web
+
+  // ---- the code (asked for once on open; React's dev double-mount must not ask twice)
+  const make = useMutation({ mutationFn: createLinkCode });
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    make.mutate();
+  }, [make]);
+  const link: LinkCode | undefined = make.data;
+  // P52: on Windows the .exe (with the code inside) is the easy way; the one line stays.
+  const hasExe = !!link?.exe;
+  const hasApp = !!link?.downloads || hasExe;
+  const tab = hasApp ? (pickedTab ?? (hasExe && os === "windows" ? "app" : "command")) : "command";
+  const left = link ? secondsLeft(link.expires_at, now) : 0;
+  const expired = !!link && left <= 0;
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+
+  // ---- watch it: every 3 s, and at once on a device.status event (lib/live.ts)
+  const status = useQuery({
+    queryKey: deviceKeys.link(link?.code ?? ""),
+    queryFn: () => linkStatus(link!.code),
+    enabled: !!link,
+    refetchInterval: (q) => (q.state.data?.status === "claimed" || q.state.data?.status === "expired" ? false : 3000),
+    retry: false,
+  });
+  const claimed = status.data?.status === "claimed";
+  const gone = expired || status.data?.status === "expired";
+
+  useEffect(() => {
+    if (claimed) void qc.invalidateQueries({ queryKey: deviceKeys.list });
+  }, [claimed, qc]);
+  // The status says which device; its name comes from the (refreshed) list.
+  const { data: devices } = useQuery({ ...devicesQuery, enabled: claimed });
+  const linked = devices?.find((d) => d.id === status.data?.device_id);
+
+  const fresh = () => {
+    setStep(1);
+    make.mutate();
+  };
+
+  // P92: linked with "let my ePerolehan work run here": ask that computer for Allow at once
+  // (asked again by itself when it comes online, if it is not online yet).
+  const allowAsked = useRef(false);
+  const askAllow = useMutation({ mutationFn: () => askMyPc(allowSite ?? EPEROLEHAN_SITE) });
+  useEffect(() => {
+    if (!claimed || !allow || allowAsked.current) return;
+    allowAsked.current = true;
+    askAllow.mutate();
+  }, [claimed, allow, askAllow]);
+
+  if (claimed && allow) {
+    const name = status.data?.device_name || linked?.name || t("your computer");
+    return (
+      <ResponsiveDialog open onOpenChange={(o) => !o && onClose()} title={t("Linked! Now press Allow on your computer")} className="w-[min(94vw,34rem)]"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => onLinked(status.data?.device_id ?? null)}><FolderOpenIcon size={16} /> {t("Set the folders")}</Button>
+            <Button onClick={onClose}>{t("Done")}</Button>
+          </>
+        }>
+        <div className="grid justify-items-center gap-3 py-2 text-center" data-step="allow">
+          <CheckCircleIcon size={52} weight="duotone" className="text-ok" />
+          <p className="text-[19px] leading-snug font-semibold">{t("Linked! Now press Allow on your computer")}</p>
+          <p className="max-w-sm text-[15px] leading-relaxed">
+            {t("On {name}, a page called Agentic Office opens by itself. Press the blue Allow button once. Then your ePerolehan work can run there.", { name })}
+          </p>
+          <AllowButtonPicture />
+          <Button variant="outline" onClick={() => askAllow.mutate()} loading={askAllow.isPending}>
+            <HandPointingIcon size={16} /> {t("Send the request again")}
+          </Button>
+          {askAllow.data && !askAllow.data.online ? (
+            <p className="max-w-sm text-[13px] text-muted">{t("Your computer is not on yet. It is asked as soon as it comes on.")}</p>
+          ) : null}
+        </div>
+      </ResponsiveDialog>
+    );
+  }
+
+  if (claimed) {
+    const name = status.data?.device_name || linked?.name || t("your computer");
+    return (
+      <ResponsiveDialog open onOpenChange={(o) => !o && onClose()} title={t("Linked: {name}", { name })} className="w-[min(94vw,32rem)]"
+        footer={
+          <>
+            <Button variant="outline" onClick={onClose}>{t("Done")}</Button>
+            <Button onClick={() => onLinked(status.data?.device_id ?? null)}><FolderOpenIcon size={16} /> {t("Set the folders")}</Button>
+          </>
+        }>
+        <div className="grid justify-items-center gap-3 py-4 text-center">
+          <CheckCircleIcon size={48} weight="duotone" className="text-ok" />
+          <p className="text-[15px] font-semibold">{t("Linked: {name}", { name })}</p>
+          <p className="max-w-sm text-[13.5px] text-muted">
+            {t("Your AI can now look in Documents, Desktop and Downloads on it. Pick other folders, or remove these, any time.")}
+          </p>
+        </div>
+      </ResponsiveDialog>
+    );
+  }
+
+  const codeRow = (
+    <div className="grid min-w-0 gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2/40 p-3 sm:p-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[12px] font-medium text-muted">{t("Your link code")}</p>
+          {link ? (
+            <p className={cn("font-mono text-[30px] leading-tight font-semibold tracking-[0.12em] tabular sm:text-[34px]", gone && "text-muted line-through")}>
+              {prettyCode(link.code)}
+            </p>
+          ) : (
+            <p className="h-10 w-48 animate-pulse rounded-sm bg-surface-2" aria-label={t("Loading…")} />
+          )}
+        </div>
+        {link && !gone ? (
+          <Button variant="outline" onClick={() => copyText(link.code)}><CopyIcon size={16} /> {t("Copy")}</Button>
+        ) : null}
+      </div>
+      {link ? (
+        gone ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[13px] text-warn">{t("This code has expired.")}</p>
+            <Button size="sm" onClick={fresh} loading={make.isPending}><ArrowClockwiseIcon size={14} /> {t("Get a new code")}</Button>
+          </div>
+        ) : (
+          <p className="flex items-center gap-1.5 text-[12.5px] text-muted">
+            <TimerIcon size={14} /> {t("Works once. Expires in {time}.", { time: countdown(left) })}
+            <span className="ml-auto inline-flex items-center gap-1.5"><span className="size-2 animate-pulse rounded-full bg-accent" /> {t("Waiting for your computer…")}</span>
+          </p>
+        )
+      ) : null}
+    </div>
+  );
+
+  // The desktop app is for Windows and Mac; Linux installs with the one line.
+  const appOs: "windows" | "mac" = os === "linux" ? "windows" : os;
+  const osPick = (
+    <Segmented label={t("Your computer")} value={tab === "app" ? appOs : os} onChange={setOs} size="sm"
+      options={[{ value: "windows", label: "Windows" }, { value: "mac", label: "Mac" },
+        ...(tab === "app" ? [] : [{ value: "linux" as const, label: "Linux" }])]} />
+  );
+  const remoteSwitch = (
+    <div className="rounded-[var(--radius-md)] border border-border bg-surface-2/40 px-3.5 py-3">
+      <SwitchField checked={remote} onCheckedChange={setRemote}
+        label={t("Also let me see and use this computer from the web")}
+        hint={t("For when you are away: watch its screen and use its mouse and keyboard from My computers. You still turn it on there with your password, and the computer shows a notice while you use it.")} />
+    </div>
+  );
+  // P42: the same line, also allowing this computer to be seen and used from the web.
+  const lines = remote && link?.install_control ? link.install_control : link?.install;
+  const command = lines ? (lines[os] ?? lines.mac) : "…";
+
+  // ---- P92: the easy way
+  const allowSwitch = (
+    <div className="rounded-[var(--radius-md)] border border-border bg-surface-2/40 px-3.5 py-3">
+      <SwitchField checked={allow} onCheckedChange={setAllow}
+        label={t("Let my ePerolehan work run on this computer")}
+        hint={t("Right after linking, your computer asks you to press Allow. Only ePerolehan, and you can turn it off there any time.")} />
+    </div>
+  );
+  const address = typeof window === "undefined" ? "" : `${window.location.host}/computers`;
+  const expiredPanel = (
+    <div role="alert" className="grid min-w-0 gap-3 rounded-[var(--radius-md)] border border-warn/40 bg-warn/8 p-4" data-step="expired">
+      <p className="text-[17px] font-semibold">{t("This code has expired.")}</p>
+      <p className="text-[14px] leading-relaxed">
+        {t("Codes work for 10 minutes, so nobody else can use them. Press Get a new code, then download the file again: an older download will not link.")}
+      </p>
+      <Button size="lg" className="justify-self-start max-sm:w-full" onClick={fresh} loading={make.isPending}>
+        <ArrowClockwiseIcon size={16} /> {t("Get a new code")}
+      </Button>
+    </div>
+  );
+  const otherWays = (
+    <button type="button" onClick={() => setOther(true)} className="min-h-10 justify-self-start text-[13px] font-medium text-accent underline-offset-2 hover:underline">
+      {t("Other ways: Mac, Linux, or one command")}
+    </button>
+  );
+  const wizardFits = !other && os === "windows" && (!link || hasExe);
+
+  if (!other && onPhone) {
+    return (
+      <ResponsiveDialog open onOpenChange={(o) => !o && onClose()} title={t("Link your computer")}
+        className="w-[min(94vw,34rem)]" footer={<Button variant="outline" onClick={onClose}>{t("Close")}</Button>}>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" data-step="phone">
+          <FormError message={make.error ? errorMessage(make.error) : null} />
+          <div className="flex min-w-0 items-start gap-3">
+            <DeviceMobileIcon size={30} weight="duotone" className="shrink-0 text-accent" />
+            <p className="text-[16px] leading-relaxed">
+              {t("You are on a phone. Linking is done on your Windows computer: open this same page there.")}
+            </p>
+          </div>
+          <div className="grid min-w-0 gap-1 rounded-[var(--radius-md)] border border-border bg-surface-2/40 p-4">
+            <p className="text-[13px] font-medium text-muted">{t("On your computer, open")}</p>
+            <p className="font-mono text-[20px] leading-snug font-semibold break-all">{address}</p>
+            <p className="text-[13px] text-muted">{t("Sign in, press Link a computer, and follow the 3 steps.")}</p>
+          </div>
+          {gone ? expiredPanel : (
+            <div className="grid min-w-0 gap-1 rounded-[var(--radius-md)] border border-border bg-surface-2/40 p-4">
+              <p className="text-[13px] font-medium text-muted">{t("Already have Agentic Office PC on it? Type this code in it")}</p>
+              {link ? (
+                <p className="font-mono text-[34px] leading-tight font-semibold tracking-[0.12em] tabular">{prettyCode(link.code)}</p>
+              ) : (
+                <p className="h-10 w-48 animate-pulse rounded-sm bg-surface-2" aria-label={t("Loading…")} />
+              )}
+              {link ? <p className="text-[12.5px] text-muted">{t("Works once. Expires in {time}.", { time: countdown(left) })}</p> : null}
+            </div>
+          )}
+          <Button variant="outline" onClick={() => setOnPhone(false)} className="justify-self-start">
+            <DesktopTowerIcon size={16} /> {t("I am on my computer now")}
+          </Button>
+        </div>
+      </ResponsiveDialog>
+    );
+  }
+
+  if (wizardFits) {
+    const exeHref = link?.exe ? (remote ? link.exe.control : link.exe.off) : undefined;
+    return (
+      <ResponsiveDialog open onOpenChange={(o) => !o && onClose()} title={t("Link your computer")}
+        description={t("About 2 minutes. You only do this once.")}
+        className="w-[min(94vw,40rem)]"
+        footer={<Button variant="outline" onClick={onClose}>{t("Close")}</Button>}>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" data-step={gone ? "expired" : String(step)}>
+          <FormError message={make.error ? errorMessage(make.error) : null} />
+          <StepBar step={step} />
+          {gone ? expiredPanel : step === 1 ? (
+            <>
+              <p className="text-[17px] leading-snug font-semibold">{t("1. Download the Agentic Office PC app")}</p>
+              <a href={exeHref ?? "#"} download="AgenticOfficePC.exe" aria-disabled={!exeHref || undefined}
+                onClick={(e) => { if (!exeHref) { e.preventDefault(); return; } setTimeout(() => setStep(2), 400); }}
+                className={cn(
+                  "flex min-h-20 min-w-0 items-center gap-4 rounded-[var(--radius-md)] bg-accent px-5 py-4 text-accent-fg shadow-[var(--shadow-soft)] transition hover:brightness-110",
+                  !exeHref && "pointer-events-none opacity-60",
+                )}>
+                <DownloadSimpleIcon size={34} weight="bold" className="shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-[18px] leading-tight font-semibold">{t("Download for Windows")}</span>
+                  <span className="block text-[13px] opacity-90">{t("Windows 10 or 11 · your code is inside the file")}</span>
+                </span>
+              </a>
+              {allowSwitch}
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                {otherWays}
+                <Button variant="ghost" size="sm" onClick={() => setStep(2)} disabled={!exeHref}>{t("I already downloaded it")}</Button>
+              </div>
+            </>
+          ) : step === 2 ? (
+            <>
+              <p className="text-[17px] leading-snug font-semibold">{t("2. Open the file you downloaded")}</p>
+              <p className="text-[15px] leading-relaxed">
+                {t("Open AgenticOfficePC.exe (in Downloads, or at the bottom or top of your browser). Windows asks once whether to trust it: click More info, then Run anyway.")}
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <WindowsSmartScreen step={1} />
+                <WindowsSmartScreen step={2} />
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeftIcon size={15} /> {t("Back")}</Button>
+                <Button size="lg" onClick={() => setStep(3)}>{t("I opened it")}</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[17px] leading-snug font-semibold">{t("3. Waiting for your computer…")}</p>
+              <div className="flex min-w-0 items-center gap-3 rounded-[var(--radius-md)] border border-border bg-surface-2/40 p-4">
+                <span aria-hidden className="size-4 shrink-0 animate-pulse rounded-full bg-accent" />
+                <p className="text-[15px] leading-relaxed">{t("It links by itself in about a minute and opens a page that says Online. Keep this window open.")}</p>
+              </div>
+              <p className="flex items-center gap-1.5 text-[13px] text-muted">
+                <TimerIcon size={14} /> {t("Works once. Expires in {time}.", { time: countdown(left) })}
+              </p>
+              <div className="grid gap-1 text-[13.5px]">
+                <p className="font-medium">{t("Nothing happens?")}</p>
+                <p className="text-muted">{t("Download the file again and open it. If Windows still blocks it, use another way below.")}</p>
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeftIcon size={15} /> {t("Download again")}</Button>
+                {otherWays}
+              </div>
+            </>
+          )}
+        </div>
+      </ResponsiveDialog>
+    );
+  }
+
+  return (
+    <ResponsiveDialog open onOpenChange={(o) => !o && onClose()} title={t("Link a computer")}
+      description={t("Install a small program on your computer and link it with a one-time code. Only your own AI can use it.")}
+      className="w-[min(94vw,46rem)]"
+      footer={<Button variant="outline" onClick={onClose}>{t("Close")}</Button>}>
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
+        <FormError message={make.error ? errorMessage(make.error) : null} />
+        {other && hasExe ? (
+          <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => { setOther(false); setOs("windows"); }}>
+            <ArrowLeftIcon size={15} /> {t("Back to the easy steps for Windows")}
+          </Button>
+        ) : null}
+        {allowSwitch}
+        {hasApp ? (
+          <Segmented label={t("How to install")} value={tab} onChange={setTab} className="w-full [&>button]:flex-1 [&>button]:justify-center"
+            options={[{ value: "app", label: hasExe && !link?.downloads ? t("Download for Windows (.exe)") : t("Download the app") }, { value: "command", label: t("Install with one command — no warnings") }]} />
+        ) : null}
+
+        {tab === "app" ? (
+          <div className="grid min-w-0 gap-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(["windows", "mac"] as const).map((o) => {
+                const OsIcon = o === "windows" ? WindowsLogoIcon : AppleLogoIcon;
+                const href = o === "windows" && link?.exe ? (remote ? link.exe.control : link.exe.off) : link?.downloads?.[o];
+                if (!href && link) return null;
+                return (
+                  <a key={o} href={href ?? "#"} download={o === "windows" && link?.exe ? "AgenticOfficePC.exe" : undefined}
+                    onClick={(e) => { if (!link) e.preventDefault(); setOs(o); }}
+                    aria-disabled={!link || undefined}
+                    className={cn(
+                      "flex min-h-16 min-w-0 items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 transition-colors",
+                      appOs === o ? "border-accent bg-accent-soft/50" : "border-border bg-surface hover:border-accent/40",
+                      !link && "pointer-events-none opacity-60",
+                    )}>
+                    <OsIcon size={28} weight="fill" className="shrink-0 text-accent" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14.5px] font-semibold">{t("Download for {os}", { os: OS_LABEL[o] })}</span>
+                      <span className="block text-[12px] text-muted">{o === "windows" ? t("Windows 10 or 11 · .exe") : t("macOS 12 or newer · .dmg")}</span>
+                    </span>
+                    <DownloadSimpleIcon size={18} className="shrink-0 text-muted" />
+                  </a>
+                );
+              })}
+            </div>
+            {hasExe ? remoteSwitch : null}
+            {codeRow}
+            <div className="grid min-w-0 gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[14px] font-semibold">{t("Then open it")}</h3>
+                {osPick}
+              </div>
+              <p className="text-[13px] text-muted">
+                {t("The app is not signed yet, so your computer asks once whether to trust it. This is what you will see:")}
+              </p>
+              {appOs === "windows" ? (
+                <>
+                  <Steps items={hasExe ? [
+                    t("Open the downloaded file (AgenticOfficePC.exe)."),
+                    t("If you see “Windows protected your PC”, click More info → Run anyway."),
+                    t("It links itself (the code is inside the download) and opens a page that says Online. It starts with Windows from now on; find it in Start → Agentic Office."),
+                  ] : [
+                    t("Open the downloaded file."),
+                    t("If you see “Windows protected your PC”, click More info → Run anyway."),
+                    t("Paste the code in the app and click Link."),
+                  ]} />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <WindowsSmartScreen step={1} />
+                    <WindowsSmartScreen step={2} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Steps items={[
+                    t("Open the downloaded file and drag Agentic Office into Applications, then open it."),
+                    t("If macOS says it can't check the app: open System Settings → Privacy & Security, scroll down, click Open Anyway, then open the app again."),
+                    t("Paste the code in the app and click Link."),
+                  ]} />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <MacGatekeeper step={1} />
+                    <MacGatekeeper step={2} />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="grid min-w-0 gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 text-[13px] text-muted">{t("No download, no warnings: one line installs the program and links this computer.")}</p>
+              {osPick}
+            </div>
+            <div className="grid min-w-0 gap-2">
+              <div className="flex min-w-0 items-stretch gap-2">
+                <pre className={cn(
+                  "min-w-0 flex-1 overflow-x-auto rounded-[var(--radius-md)] border border-border bg-[#0f172a] px-3.5 py-3 font-mono text-[13px] leading-relaxed text-[#e2e8f0]",
+                  gone && "opacity-50",
+                )}>
+                  <code>{command}</code>
+                </pre>
+                <Button className="h-auto" disabled={!link || gone} onClick={() => link && copyText(command)} aria-label={t("Copy the command")}>
+                  <CopyIcon size={16} /> <span className="max-sm:hidden">{t("Copy")}</span>
+                </Button>
+              </div>
+              <p className="text-[12px] text-muted">{t("The code inside works once and expires in 10 minutes.")}</p>
+            </div>
+            {remoteSwitch}
+            <Steps items={os === "windows" ? [
+              <span key="a" className="inline-flex flex-wrap items-center gap-1"><TerminalWindowIcon size={15} className="text-accent" /> {t("Press Start, type PowerShell, open it, paste, press Enter.")}</span>,
+              t("Wait for “Linked” (about a minute: it downloads Node.js from nodejs.org and the agent)."),
+              t("It starts by itself with your computer from now on. No admin rights needed."),
+            ] : os === "linux" ? [
+              <span key="a" className="inline-flex flex-wrap items-center gap-1"><TerminalWindowIcon size={15} className="text-accent" /> {t("Open a terminal (Ctrl+Alt+T on most desktops), paste, press Enter.")}</span>,
+              t("Wait for “Linked” (about a minute: it downloads Node.js from nodejs.org and the agent)."),
+              t("It starts by itself when you sign in from now on. No sudo needed."),
+            ] : [
+              <span key="a" className="inline-flex flex-wrap items-center gap-1"><TerminalWindowIcon size={15} className="text-accent" /> {t("Open Terminal (Spotlight → Terminal), paste, press Enter.")}</span>,
+              t("Wait for “Linked” (about a minute: it downloads Node.js from nodejs.org and the agent)."),
+              t("It starts by itself with your computer from now on. No admin rights needed."),
+            ]} />
+            {codeRow}
+          </div>
+        )}
+      </div>
+    </ResponsiveDialog>
+  );
+}

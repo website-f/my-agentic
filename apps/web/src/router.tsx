@@ -1,0 +1,836 @@
+import { ArrowClockwiseIcon, PlugsIcon } from "@phosphor-icons/react";
+import type { QueryClient } from "@tanstack/react-query";
+import {
+  createRootRouteWithContext,
+  createRoute,
+  createRouter,
+  lazyRouteComponent,
+  Outlet,
+  redirect,
+  useRouter,
+  type AnyRouter,
+  type ParsedLocation,
+} from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
+import { safeFrom } from "@/components/chat/links";
+import { STORE_VIEWS, type StoreView } from "@/lib/file-store";
+
+import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
+import { ApiError, errorMessage, readCookie } from "@/lib/api";
+import { meQuery, setupStatusQuery } from "@/lib/queries";
+import type { AppPath } from "@/nav";
+import type { Me } from "@/lib/types";
+
+// P104: the navigation (every page's icon) comes with the shell; the access check waits for it
+// alongside "who am I", so neither the sign-in page nor the first download carries it.
+const loadNav = () => import("@/nav");
+// P104: a page's first data is asked for while its code downloads, and on hover (lib/prefetch).
+type Prefetch = typeof import("@/lib/prefetch");
+const prefetch = (fn: (p: Prefetch) => void) => {
+  void import("@/lib/prefetch").then(fn, () => {});
+};
+const NotFoundPage = lazyRouteComponent(() => import("@/pages/placeholder"), "NotFoundPage");
+
+// Each page is its own chunk, and so is the signed-in shell (P104: the sign-in page needs
+// neither); pages load on demand.
+const AppShell = lazyRouteComponent(() => import("@/components/shell"), "AppShell");
+const page = {
+  setup: lazyRouteComponent(() => import("@/pages/auth"), "SetupPage"),
+  login: lazyRouteComponent(() => import("@/pages/auth"), "LoginPage"),
+  changePassword: lazyRouteComponent(() => import("@/pages/auth"), "ChangePasswordPage"),
+  twoStepSetup: lazyRouteComponent(() => import("@/pages/auth"), "TwoStepSetupPage"),
+  home: lazyRouteComponent(() => import("@/pages/command-center"), "CommandCenterPage"),
+  assistants: lazyRouteComponent(() => import("@/pages/assistants"), "AssistantsPage"),
+  settings: lazyRouteComponent(() => import("@/pages/settings"), "SettingsPage"),
+  notifications: lazyRouteComponent(() => import("@/pages/notifications"), "NotificationsPage"),
+  storage: lazyRouteComponent(() => import("@/pages/storage"), "StoragePage"),
+  timetable: lazyRouteComponent(() => import("@/pages/timetable"), "TimetablePage"),
+  activity: lazyRouteComponent(() => import("@/pages/activity"), "ActivityPage"),
+  aiEngine: lazyRouteComponent(() => import("@/pages/ai-engine"), "AIEnginePage"),
+  agents: lazyRouteComponent(() => import("@/pages/agents/roster"), "AgentsPage"),
+  agentNew: lazyRouteComponent(() => import("@/pages/agents/builder"), "AgentBuilderPage"),
+  agentDetail: lazyRouteComponent(() => import("@/pages/agents/detail"), "AgentDetailPage"),
+  tasks: lazyRouteComponent(() => import("@/pages/tasks/board"), "TasksPage"),
+  approvals: lazyRouteComponent(() => import("@/pages/approvals"), "ApprovalsPage"),
+  chat: lazyRouteComponent(() => import("@/pages/chat"), "ChatPage"),
+  sops: lazyRouteComponent(() => import("@/pages/sops"), "SopsPage"),
+  library: lazyRouteComponent(() => import("@/pages/library"), "LibraryPage"),
+  brain: lazyRouteComponent(() => import("@/pages/brain"), "BrainPage"),
+  skills: lazyRouteComponent(() => import("@/pages/skills"), "SkillsPage"),
+  learning: lazyRouteComponent(() => import("@/pages/learning"), "LearningPage"),
+  office: lazyRouteComponent(() => import("@/pages/office"), "OfficePage"),
+  channels: lazyRouteComponent(() => import("@/pages/channels"), "ChannelsPage"),
+  approve: lazyRouteComponent(() => import("@/pages/approve"), "ApprovePage"),
+  meetings: lazyRouteComponent(() => import("@/pages/meetings"), "MeetingsPage"),
+  monitor: lazyRouteComponent(() => import("@/pages/monitor"), "MonitorPage"),
+  schedules: lazyRouteComponent(() => import("@/pages/schedules"), "SchedulesPage"),
+  reports: lazyRouteComponent(() => import("@/pages/reports"), "ReportsPage"),
+  logins: lazyRouteComponent(() => import("@/pages/logins"), "LoginsPage"),
+  blueprints: lazyRouteComponent(() => import("@/pages/blueprints"), "BlueprintsPage"),
+  workflows: lazyRouteComponent(() => import("@/pages/workflows"), "WorkflowsPage"),
+  companyKit: lazyRouteComponent(() => import("@/pages/documents/kit"), "CompanyKitPage"),
+  mcpServers: lazyRouteComponent(() => import("@/pages/mcp-servers"), "McpServersPage"),
+  explorer: lazyRouteComponent(() => import("@/pages/explorer"), "ExplorerPage"),
+  libraryFrame: lazyRouteComponent(() => import("@/pages/explorer/frame"), "LibraryFrame"),
+  templates: lazyRouteComponent(() => import("@/pages/documents/templates"), "TemplatesPage"),
+  documents: lazyRouteComponent(() => import("@/pages/documents/documents"), "DocumentsPage"),
+  packs: lazyRouteComponent(() => import("@/pages/documents/packs"), "PacksPage"),
+  desk: lazyRouteComponent(() => import("@/pages/desk"), "DeskPage"),
+  forms: lazyRouteComponent(() => import("@/pages/forms"), "FormsPage"),
+  impact: lazyRouteComponent(() => import("@/pages/impact"), "ImpactPage"),
+  chatFull: lazyRouteComponent(() => import("@/pages/chat-full"), "ChatFullPage"),
+  objectives: lazyRouteComponent(() => import("@/pages/objectives"), "ObjectivesPage"),
+  search: lazyRouteComponent(() => import("@/pages/search"), "SearchPage"),
+  computers: lazyRouteComponent(() => import("@/pages/computers"), "ComputersPage"),
+  remote: lazyRouteComponent(() => import("@/pages/computers/remote"), "RemotePage"),
+  webConnections: lazyRouteComponent(() => import("@/pages/web-connections"), "WebConnectionsPage"),
+  mail: lazyRouteComponent(() => import("@/pages/mail"), "MailPage"),
+  inbox: lazyRouteComponent(() => import("@/pages/inbox"), "InboxPage"),
+  whatsapp: lazyRouteComponent(() => import("@/pages/whatsapp"), "WhatsAppPage"),
+};
+
+function Root() {
+  return (
+    <>
+      <Outlet />
+    </>
+  );
+}
+
+const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const num = (v: unknown) => (v ? Number(v) : undefined);
+
+const AI_TABS = ["providers", "groups", "privacy", "usage", "people", "playground", "settings"] as const;
+
+interface RouterContext {
+  queryClient: QueryClient;
+}
+
+function RootError({ error }: { error: unknown }) {
+  const t = useT();
+  const router = useRouter();
+  const offline = error instanceof ApiError && error.code === "network";
+  // The phone has no connection at all (an installed app opened offline): say so plainly.
+  const noNet = offline && typeof navigator !== "undefined" && !navigator.onLine;
+  return (
+    <div className="grid min-h-dvh place-items-center px-6">
+      <div className="max-w-sm">
+        <PlugsIcon size={32} weight="duotone" className="text-danger" />
+        <h1 className="mt-3 text-lg font-semibold">{noNet ? t("You are offline") : offline ? t("The server is not answering") : t("This page failed to load")}</h1>
+        <p className="mt-1 text-[13.5px] text-muted">
+          {noNet ? t("Connect to the internet or Wi-Fi, then try again.") : offline ? t("Start the stack with docker compose up -d, then try again.") : errorMessage(error)}
+        </p>
+        <Button className="mt-5" onClick={() => router.invalidate()}>
+          <ArrowClockwiseIcon size={16} /> {t("Try again")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: Root,
+  errorComponent: RootError,
+  notFoundComponent: NotFoundPage,
+});
+
+async function loadMe(qc: QueryClient, location: ParsedLocation): Promise<Me> {
+  try {
+    return await qc.ensureQueryData(meQuery);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      const setup = await qc.fetchQuery(setupStatusQuery).catch(() => null);
+      if (setup?.needs_setup) throw redirect({ to: "/setup" });
+      throw redirect({ to: "/login", search: { next: location.href } });
+    }
+    throw e;
+  }
+}
+
+async function alreadySignedIn(qc: QueryClient): Promise<Me | null> {
+  try {
+    return await qc.ensureQueryData(meQuery);
+  } catch {
+    return null;
+  }
+}
+
+const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/setup",
+  beforeLoad: async ({ context }) => {
+    const s = await context.queryClient.fetchQuery(setupStatusQuery);
+    if (!s.needs_setup) throw redirect({ to: "/login" });
+  },
+  component: page.setup,
+});
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  // P63: sso = back from "Sign in with Microsoft" (done: signed in, the page lands the person;
+  // code: the two-step code comes next); sso_error = why it did not work.
+  validateSearch: (s: Record<string, unknown>): { next?: string; sso?: "done" | "code"; sso_error?: string } => ({
+    next: typeof s.next === "string" ? s.next : undefined,
+    sso: s.sso === "done" || s.sso === "code" ? s.sso : undefined,
+    sso_error: typeof s.sso_error === "string" ? s.sso_error.slice(0, 200) : undefined,
+  }),
+  beforeLoad: async ({ context, search }) => {
+    // P104: both questions at once (each is a round trip); the answers are used as before.
+    const [signedIn, s] = await Promise.all([
+      search.sso !== "done" ? alreadySignedIn(context.queryClient) : null,
+      context.queryClient.fetchQuery(setupStatusQuery).catch(() => null),
+    ]);
+    if (signedIn) throw redirect({ to: "/" });
+    if (s?.needs_setup) throw redirect({ to: "/setup" });
+  },
+  // P104: while the person types, the code of where they land next (their workspace, or the
+  // page they were on their way to) downloads in the background.
+  loaderDeps: ({ search }) => ({ next: search.next }),
+  loader: ({ deps }) => whenIdle(() => preloadChunksFor(deps.next?.startsWith("/") && !deps.next.startsWith("//") ? deps.next : "/workspace")),
+  component: page.login,
+});
+
+const changePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/change-password",
+  beforeLoad: async ({ context, location }) => {
+    await loadMe(context.queryClient, location);
+  },
+  component: page.changePassword,
+});
+
+// P57: the company requires two-step sign-in and this person has not set it up yet.
+const twoStepSetupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/two-step-setup",
+  beforeLoad: async ({ context, location }) => {
+    let me = await loadMe(context.queryClient, location);
+    // Sent here by a 2fa_required answer: the cached "me" may predate the company's rule.
+    if (!me.user.two_factor_setup_required) me = await context.queryClient.fetchQuery({ ...meQuery, staleTime: 0 });
+    if (me.user.must_change_password) throw redirect({ to: "/change-password" });
+    if (!me.user.two_factor_setup_required) throw redirect({ to: "/" });
+  },
+  component: page.twoStepSetup,
+});
+
+const appRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "app",
+  beforeLoad: async ({ context, location }) => {
+    const [me, { pathAllowed }] = await Promise.all([loadMe(context.queryClient, location), loadNav()]);
+    if (me.user.must_change_password) throw redirect({ to: "/change-password" });
+    if (me.user.two_factor_setup_required) throw redirect({ to: "/two-step-setup" });
+    // P99: a Prima-only person has no office pages: Prima opens for them.
+    // P36: one guard for every page, the same rule as the sidebar: staff keep to their own
+    // desk, their AI and the work they are part of. Their AI's profile is My AI.
+    if (!pathAllowed(location.pathname, me.permissions)) {
+      throw redirect({ to: "/workspace" });
+    }
+    return { me };
+  },
+  loader: ({ context }) => prefetch((p) => p.warmShell(context.queryClient)),
+  component: AppShell,
+});
+
+// P61b: the whole Library (Browse, Documents, SOPs, Guidelines, Templates, Packs, Company kit,
+// Search) in one full-screen frame without the app shell, signed in and allowed each page.
+const libraryFrameRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "library",
+  beforeLoad: async ({ context, location }) => {
+    const [me, { pathAllowed }] = await Promise.all([loadMe(context.queryClient, location), loadNav()]);
+    if (me.user.must_change_password) throw redirect({ to: "/change-password" });
+    if (me.user.two_factor_setup_required) throw redirect({ to: "/two-step-setup" });
+    // Browse (/explorer) is the Library's own page: the same rule as /files.
+    if (!pathAllowed(location.pathname === "/explorer" ? "/files" : location.pathname, me.permissions)) throw redirect({ to: "/workspace" });
+    return { me };
+  },
+  component: page.libraryFrame,
+});
+
+const homeRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/",
+  loader: ({ context, preload }) => prefetch((p) => p.warmHome(context.queryClient, preload)),
+  component: page.home,
+});
+const assistantsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/assistants",
+  // P30: private assistants are for people who manage others; staff have their AI twin.
+  // google / ms: back from Google or Microsoft (P34) sign-in, with msg as the detail.
+  validateSearch: (s: Record<string, unknown>): { a?: string; tab?: "chat" | "drafts" | "settings"; google?: string; ms?: string; msg?: string } => ({
+    a: str(s.a),
+    tab: s.tab === "drafts" || s.tab === "settings" || s.tab === "chat" ? s.tab : undefined,
+    google: str(s.google),
+    ms: str(s.ms),
+    msg: str(s.msg),
+  }),
+  component: page.assistants,
+});
+
+const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: page.settings });
+
+// P114: each person's own notifications (every role).
+const notificationsRoute = createRoute({ getParentRoute: () => appRoute, path: "/notifications", component: page.notifications });
+// P40: where company files are kept, and storage that feeds the Library.
+const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/storage", component: page.storage });
+// P47: every agent's working day (hours, breaks, duties), like a staff rota.
+const timetableRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/timetable",
+  validateSearch: (s: Record<string, unknown>): { date?: string; agent?: string } => ({
+    date: typeof s.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : undefined,
+    agent: typeof s.agent === "string" ? s.agent : undefined,
+  }),
+  component: page.timetable,
+});
+
+const activityRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/activity",
+  beforeLoad: ({ context }) => {
+    if (!context.me.permissions.includes("audit.read")) throw redirect({ to: "/" });
+  },
+  component: page.activity,
+});
+
+const aiEngineRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/ai-engine",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof AI_TABS)[number] } => ({
+    tab: AI_TABS.find((t) => t === s.tab),
+  }),
+  component: page.aiEngine,
+});
+
+const agentsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/agents",
+  // P107: no view = the table; departments = the cards by department.
+  validateSearch: (s: Record<string, unknown>): { view?: "org" | "departments" } => ({ view: s.view === "org" || s.view === "departments" ? s.view : undefined }),
+  component: page.agents,
+});
+const agentNewRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/agents/new",
+  beforeLoad: ({ context }) => {
+    if (!["agents.manage", "agents.own"].some((p) => context.me.permissions.includes(p))) throw redirect({ to: "/agents" });
+  },
+  component: page.agentNew,
+});
+const agentDetailRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/agents/$agentId",
+  validateSearch: (s: Record<string, unknown>): { tab?: string } => ({ tab: str(s.tab) }),
+  component: page.agentDetail,
+});
+const tasksRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/tasks",
+  // P97 `who`: open on a slice of the board (assigned = for me, team = my team).
+  validateSearch: (s: Record<string, unknown>): { task?: string; new?: number; agent?: string; brief?: string; objective?: string; who?: string } => ({
+    task: str(s.task), new: num(s.new), agent: str(s.agent), brief: str(s.brief), objective: str(s.objective), who: str(s.who),
+  }),
+  loader: ({ context, preload }) => prefetch((p) => p.warmTasks(context.queryClient, preload)),
+  component: page.tasks,
+});
+const approvalsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/approvals",
+  validateSearch: (s: Record<string, unknown>): { tab?: "pending" | "history" } => ({
+    tab: s.tab === "history" ? s.tab : undefined,
+  }),
+  loader: ({ context, preload }) => prefetch((p) => p.warmApprovals(context.queryClient, preload)),
+  component: page.approvals,
+});
+const chatRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/chat",
+  validateSearch: (s: Record<string, unknown>): { agent?: string } => ({ agent: str(s.agent) }),
+  // Old links (/chat?agent=…) open that agent's chat full screen.
+  beforeLoad: ({ search }) => {
+    if (search.agent) throw redirect({ to: "/chat/$agentId", params: { agentId: search.agent }, search: { from: "/chat" } });
+  },
+  loader: ({ context, preload }) => prefetch((p) => p.warmChat(context.queryClient, preload)),
+  component: page.chat,
+});
+const sopsRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/sops",
+  validateSearch: (s: Record<string, unknown>): { sop?: string } => ({ sop: str(s.sop) }),
+  component: page.sops,
+});
+const libraryRoute = createRoute({ getParentRoute: () => libraryFrameRoute, path: "/library", component: page.library });
+
+const BRAIN_TABS = ["pages", "facts", "search", "graph", "dreams"] as const;
+const brainRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/brain",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof BRAIN_TABS)[number]; path?: string; dream?: string; q?: string } => ({
+    tab: BRAIN_TABS.find((t) => t === s.tab),
+    path: str(s.path),
+    dream: str(s.dream),
+    q: str(s.q),
+  }),
+  component: page.brain,
+});
+
+const channelsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/channels",
+  // P34: back from Microsoft's tenant-wide admin consent (ms_admin=ok|error, msg = the reason).
+  validateSearch: (s: Record<string, unknown>): { ms_admin?: string; msg?: string } => ({ ms_admin: str(s.ms_admin), msg: str(s.msg) }),
+  component: page.channels,
+});
+const approveRoute = createRoute({ getParentRoute: () => appRoute, path: "/approve/$approvalId", component: page.approve });
+
+const officeRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/office",
+  validateSearch: (s: Record<string, unknown>): { agent?: string; view?: "map" | "list" } => ({
+    agent: str(s.agent),
+    view: s.view === "list" ? "list" : undefined,
+  }),
+  component: page.office,
+});
+
+const SKILL_TABS = ["library", "routines", "proposals", "history"] as const;
+const skillsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/skills",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof SKILL_TABS)[number]; skill?: string; proposal?: string } => ({
+    tab: SKILL_TABS.find((t) => t === s.tab),
+    skill: str(s.skill),
+    proposal: str(s.proposal),
+  }),
+  component: page.skills,
+});
+
+const learningRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/learning",
+  // P45: tab=week (the default: per agent) | overview; week=2026-W43. P92: tab=lessons.
+  validateSearch: (s: Record<string, unknown>): { days?: number; tab?: "week" | "overview" | "lessons"; week?: string } => ({
+    days: [7, 30, 90].find((d) => d === Number(s.days)),
+    tab: s.tab === "overview" || s.tab === "week" || s.tab === "lessons" ? s.tab : undefined,
+    week: typeof s.week === "string" && /^\d{4}-W\d{2}$/i.test(s.week) ? s.week.toUpperCase() : undefined,
+  }),
+  component: page.learning,
+});
+
+const monitorRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/monitor",
+  validateSearch: (s: Record<string, unknown>): { agent?: string; wall?: number } => ({ agent: str(s.agent), wall: num(s.wall) }),
+  component: page.monitor,
+});
+
+const meetingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/meetings",
+  // tab=minutes: people meetings (recordings -> minutes); rec opens one.
+  validateSearch: (s: Record<string, unknown>): { m?: string; new?: number; task?: string; tab?: "minutes"; rec?: string } => ({
+    m: str(s.m), new: num(s.new), task: str(s.task), tab: s.tab === "minutes" ? "minutes" : undefined, rec: str(s.rec),
+  }),
+  component: page.meetings,
+});
+
+const SCHEDULE_TABS = ["schedules", "runs", "incidents", "system"] as const;
+const schedulesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/schedules",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof SCHEDULE_TABS)[number] } => ({
+    tab: SCHEDULE_TABS.find((t) => t === s.tab),
+  }),
+  component: page.schedules,
+});
+
+const reportsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/reports",
+  validateSearch: (s: Record<string, unknown>): { r?: string } => ({ r: str(s.r) }),
+  component: page.reports,
+});
+const loginsRoute = createRoute({ getParentRoute: () => appRoute, path: "/logins", component: page.logins });
+const workflowsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/workflows",
+  validateSearch: (s: Record<string, unknown>): { w?: string; run?: string } => ({ w: str(s.w), run: str(s.run) }),
+  beforeLoad: ({ context }) => {
+    if (!["agents.manage", "agents.own", "work.write"].some((p) => context.me.permissions.includes(p))) throw redirect({ to: "/agents" });
+  },
+  component: page.workflows,
+});
+const companyKitRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/company-kit",
+  validateSearch: (s: Record<string, unknown>): { b?: string } => ({ b: str(s.b) }),
+  component: page.companyKit,
+});
+/** The Library's address: f = the open file, folder, origin (made by), page = open a PDF at
+ * that page (a search hit), view = a ready-made folder (see STORE_VIEWS), task = one task's
+ * files, from = where Back goes. */
+interface LibrarySearch {
+  f?: string; folder?: string; origin?: "agent" | "uploaded" | "person"; page?: number; view?: StoreView; task?: string; from?: string;
+}
+const librarySearch = (s: Record<string, unknown>): LibrarySearch => ({
+  f: str(s.f), folder: str(s.folder), origin: s.origin === "agent" || s.origin === "uploaded" || s.origin === "person" ? s.origin : undefined,
+  page: num(s.page),
+  view: (STORE_VIEWS as readonly unknown[]).includes(s.view) ? (s.view as StoreView) : undefined,
+  task: str(s.task),
+  from: safeFrom(s.from),
+});
+// P61: the Library is a full-screen explorer (/explorer, below). /files, the address every link
+// and the nav use, goes there with the same search.
+const filesRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/files",
+  validateSearch: librarySearch,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/explorer", search, replace: true });
+  },
+});
+const templatesRoute = createRoute({ getParentRoute: () => libraryFrameRoute, path: "/templates", component: page.templates });
+const documentsRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/documents",
+  validateSearch: (s: Record<string, unknown>): { d?: string; new?: number; view?: "review" } => ({ d: str(s.d), new: num(s.new), view: s.view === "review" ? "review" : undefined }),
+  component: page.documents,
+});
+const packsRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/packs",
+  validateSearch: (s: Record<string, unknown>): { p?: string } => ({ p: str(s.p) }),
+  component: page.packs,
+});
+const mcpServersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/mcp-servers",
+  beforeLoad: ({ context }) => {
+    if (!context.me.permissions.includes("mcp.manage")) throw redirect({ to: "/" });
+  },
+  component: page.mcpServers,
+});
+const blueprintsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/blueprints",
+  beforeLoad: ({ context }) => {
+    if (!["agents.manage", "agents.own"].some((p) => context.me.permissions.includes(p))) throw redirect({ to: "/agents" });
+  },
+  component: page.blueprints,
+});
+
+
+// P26: each person's own desk.
+const DESK_TABS = ["overview", "work", "files", "procedures", "agents"] as const;
+const deskRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/workspace",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof DESK_TABS)[number] } => ({
+    tab: DESK_TABS.includes(s.tab as (typeof DESK_TABS)[number]) ? (s.tab as (typeof DESK_TABS)[number]) : undefined,
+  }),
+  loaderDeps: ({ search }) => ({ tab: search.tab }),
+  loader: ({ context, preload, deps }) => prefetch((p) => p.warmDesk(context.queryClient, preload, deps.tab)),
+  component: page.desk,
+});
+
+// P27: company forms to hand in by a deadline.
+const FORM_TABS = ["todo", "all", "archived"] as const;
+const formsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/forms",
+  validateSearch: (s: Record<string, unknown>): { tab?: (typeof FORM_TABS)[number]; form?: string } => ({
+    tab: FORM_TABS.find((t) => t === s.tab),
+    form: typeof s.form === "string" ? s.form : undefined,
+  }),
+  component: page.forms,
+});
+
+// P19: owners, admins and managers see what the AI team measurably did.
+const impactRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/impact",
+  beforeLoad: ({ context }) => {
+    if (!["org.manage", "team.manage"].some((p) => context.me.permissions.includes(p))) throw redirect({ to: "/" });
+  },
+  component: page.impact,
+});
+
+// P21: company objectives; o opens one, new=1 opens the create form.
+// P25: search inside every document.
+const SEARCH_TYPES = ["file", "sop", "document", "template", "page"] as const;
+const searchRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/search",
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { q?: string; type?: (typeof SEARCH_TYPES)[number]; kind?: string; dept?: string; source?: "upload" | "agent" | "person" } => ({
+    q: str(s.q),
+    type: SEARCH_TYPES.find((x) => x === s.type),
+    kind: str(s.kind),
+    dept: str(s.dept),
+    source: s.source === "upload" || s.source === "agent" || s.source === "person" ? s.source : undefined,
+  }),
+  component: page.search,
+});
+
+// P31: a person's own computers, for their own AI (twin: agents.own; private assistant: assistants.use).
+const computersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/computers",
+  validateSearch: (s: Record<string, unknown>): { link?: number; device?: string } => ({ link: num(s.link), device: str(s.device) }),
+  beforeLoad: ({ context }) => {
+    // P92: and anyone who gives work (their ePerolehan work runs on their own computer).
+    if (!["agents.own", "assistants.use", "work.write"].some((p) => context.me.permissions.includes(p))) throw redirect({ to: "/workspace" });
+  },
+  component: page.computers,
+});
+// P42: one of the person's own computers, reached from the web (health, files, screen, control).
+const remoteRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/computers/$deviceId/remote",
+  validateSearch: (s: Record<string, unknown>): { staff?: string } => ({ staff: s.staff === "1" ? "1" : undefined }),
+  beforeLoad: ({ context }) => {
+    // P53: a manager may open a staff computer's remote page too (?staff=1 on the roster).
+    if (!["agents.own", "assistants.use", "members.manage", "team.manage"].some((perm) => context.me.permissions.includes(perm))) throw redirect({ to: "/workspace" });
+  },
+  component: page.remote,
+});
+
+const webConnectionsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/web-connections",
+  beforeLoad: ({ context }) => {
+    if (!context.me.permissions.includes("org.manage")) throw redirect({ to: "/settings" });
+  },
+  component: page.webConnections,
+});
+
+// P34: mail that reached the person's Outlook and the shared mailboxes, and what the AI did with it.
+// `mailbox` is what the server's follow-up notices link with; same as `box`.
+// P109: the tabs (Teams, Calendar, Approvals, Other email accounts); none is Outlook mail.
+type M365App = "teams" | "calendar" | "approvals" | "accounts";
+interface M365Search { box?: string; ms?: string; msg?: string; app?: M365App; from?: string; new?: "meeting" }
+const m365Search = (s: Record<string, unknown>): M365Search => ({
+  box: str(s.box) ?? str(s.mailbox), ms: str(s.ms), msg: str(s.msg),
+  app: s.app === "teams" || s.app === "calendar" || s.app === "approvals" || s.app === "accounts" ? s.app : undefined,
+  from: safeFrom(s.from),
+  new: s.new === "meeting" ? "meeting" : undefined,
+});
+// P109b: /mail (the nav, notices, Microsoft's way back) opens the full-screen workspace.
+const mailRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/mail",
+  validateSearch: m365Search,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/m365", search, replace: true });
+  },
+});
+// P109b: the Microsoft 365 workspace, full screen without the app shell (its own Back and tabs),
+// signed in and allowed like /mail was.
+const m365Route = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/m365",
+  validateSearch: m365Search,
+  beforeLoad: async ({ context, location }) => {
+    const me = await loadMe(context.queryClient, location);
+    if (me.user.must_change_password) throw redirect({ to: "/change-password" });
+    if (me.user.two_factor_setup_required) throw redirect({ to: "/two-step-setup" });
+    if (!["agents.own", "assistants.use", "channels.manage"].some((p) => me.permissions.includes(p))) throw redirect({ to: "/workspace" });
+    return { me };
+  },
+  loaderDeps: ({ search }) => ({ box: search.box }),
+  loader: ({ context, preload, deps }) => prefetch((p) => p.warmMail(context.queryClient, preload, deps.box)),
+  component: page.mail,
+});
+
+const objectivesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/objectives",
+  validateSearch: (s: Record<string, unknown>): { o?: string; new?: number } => ({ o: str(s.o), new: num(s.new) }),
+  component: page.objectives,
+});
+
+// One agent's chat, full screen without the app shell (like /present), signed in.
+const chatFullRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/chat/$agentId",
+  validateSearch: (s: Record<string, unknown>): { session?: string; from?: string } => ({ session: str(s.session), from: safeFrom(s.from) }),
+  beforeLoad: async ({ context, location }) => {
+    const me = await loadMe(context.queryClient, location);
+    if (me.user.must_change_password) throw redirect({ to: "/change-password" });
+  },
+  component: page.chatFull,
+});
+
+// P61: the Library's file explorer (its Browse tab).
+const explorerRoute = createRoute({
+  getParentRoute: () => libraryFrameRoute,
+  path: "/explorer",
+  validateSearch: librarySearch,
+  component: page.explorer,
+});
+
+// Every email account in one place. ms / google: back from Microsoft or Google sign-in, with
+// msg then being the detail to show (not a message id).
+const inboxRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/inbox",
+  validateSearch: (s: Record<string, unknown>): { account?: string; folder?: string; msg?: string; ms?: string; google?: string } => ({
+    account: str(s.account),
+    folder: str(s.folder),
+    msg: str(s.msg),
+    ms: str(s.ms),
+    google: str(s.google),
+  }),
+  component: page.inbox,
+});
+
+// The connected WhatsApp number's chats, and where the AI answers in each.
+const whatsappRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/whatsapp",
+  validateSearch: (s: Record<string, unknown>): { chat?: string } => ({ chat: str(s.chat) }),
+  component: page.whatsapp,
+});
+
+// Kept for pages that have not shipped yet (none right now).
+export function placeholder<P extends AppPath>(path: P) {
+  const Placeholder = lazy(() =>
+    Promise.all([loadNav(), import("@/pages/placeholder")]).then(([nav, p]) => ({
+      default: () => <p.PlaceholderPage item={nav.ALL_NAV.find((n) => n.to === path)!} />,
+    })),
+  );
+  return createRoute({
+    getParentRoute: () => appRoute,
+    path,
+    component: () => (
+      <Suspense fallback={null}>
+        <Placeholder />
+      </Suspense>
+    ),
+  });
+}
+
+const routeTree = rootRoute.addChildren([
+  setupRoute,
+  loginRoute,
+  changePasswordRoute,
+  twoStepSetupRoute,
+  chatFullRoute,
+  m365Route,
+  libraryFrameRoute.addChildren([
+    explorerRoute,
+    filesRoute,
+    documentsRoute,
+    sopsRoute,
+    libraryRoute,
+    templatesRoute,
+    packsRoute,
+    companyKitRoute,
+    searchRoute,
+  ]),
+  appRoute.addChildren([
+    homeRoute,
+    assistantsRoute,
+    settingsRoute,
+    notificationsRoute,
+    storageRoute,
+    timetableRoute,
+    activityRoute,
+    aiEngineRoute,
+    agentsRoute,
+    agentNewRoute,
+    agentDetailRoute,
+    tasksRoute,
+    approvalsRoute,
+    chatRoute,
+    brainRoute,
+    skillsRoute,
+    learningRoute,
+    officeRoute,
+    channelsRoute,
+    approveRoute,
+    meetingsRoute,
+    schedulesRoute,
+    monitorRoute,
+    reportsRoute,
+    loginsRoute,
+    blueprintsRoute,
+    mcpServersRoute,
+    workflowsRoute,
+    deskRoute,
+    formsRoute,
+    impactRoute,
+    objectivesRoute,
+    computersRoute,
+    webConnectionsRoute,
+    remoteRoute,
+    mailRoute,
+    inboxRoute,
+    whatsappRoute,
+  ]),
+]);
+
+/**
+ * P104: start downloading the code of what the address opens (the shell and the page) at once,
+ * alongside "who am I", instead of after it. Pages behind sign-in only when this browser looks
+ * signed in (the CSRF cookie lives exactly as long as the session), so a first visit to "/"
+ * does not fetch the office's code just to land on the sign-in page.
+ */
+export function preloadMatchedChunks(router: ChunkRouter): void {
+  try {
+    const [routes] = router.getMatchedRoutes(router.latestLocation.pathname);
+    const needsSession = routes.some((r) => r.id === appRoute.id || r.id === libraryFrameRoute.id);
+    if (needsSession && !readCookie("agentic_csrf")) return;
+  } catch {
+    return; // the router loads them itself
+  }
+  preloadChunksFor(router.latestLocation.pathname, router);
+}
+
+type ChunkRouter = Pick<AnyRouter, "getMatchedRoutes" | "loadRouteChunk" | "latestLocation">;
+let theRouter: ChunkRouter | null = null;
+
+/** Download the code of every route `pathname` opens (no data, no checks). */
+function preloadChunksFor(pathname: string, router = theRouter): void {
+  if (!router) return;
+  try {
+    const [routes] = router.getMatchedRoutes(pathname.split(/[?#]/)[0]!);
+    for (const r of routes) void Promise.resolve(router.loadRouteChunk(r)).catch(() => {});
+  } catch {
+    /* the router loads them itself when the page opens */
+  }
+}
+
+/** After the current page has settled: a second, then when the browser is idle. */
+function whenIdle(fn: () => void): void {
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => {
+    if ("requestIdleCallback" in window) window.requestIdleCallback(fn, { timeout: 3000 });
+    else fn();
+  }, 1000);
+}
+
+export function makeRouter(queryClient: QueryClient) {
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    defaultPreload: "intent",
+    defaultPreloadStaleTime: 0,
+    scrollRestoration: true,
+    // The full-screen Library scrolls inside its own area: a new page starts at its top.
+    scrollToTopSelectors: ["#library-main"],
+  });
+  theRouter = router;
+  return router;
+}
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: ReturnType<typeof makeRouter>;
+  }
+}
