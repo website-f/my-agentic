@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # keeps the long timeout. And such a chat waits at most this long for a resting model
     # before the backup answers.
     ai_answer_timeout: float = Field(default=25.0, ge=3, le=120)
+    # My Agentic: a model group with no member ticked "share" shares the work between all
+    # its cloud models (engine/rotation.share_by_default). Off = the saved order, first first.
+    ai_share_by_default: bool = True
     ai_chat_max_wait: float = Field(default=20.0, ge=0, le=60)
 
     # Where people open the app (P16): Google sign-in returns here, links in messages point here.

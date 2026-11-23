@@ -216,7 +216,14 @@ async def _chat(
     interactive = task in INTERACTIVE_TASKS
     cap = min(MAX_WAIT, settings.ai_chat_max_wait) if interactive else MAX_WAIT
     # P105: shared members take turns (sticky per agent or task), then the rest in order.
-    members = await rotation.order(g.id, g.members, agent_id, task_id)
+    # My Agentic: a group where no member was marked shared shares the work between ALL its
+    # cloud models (the local backup model stays last), so every provider added is used.
+    pool = (
+        rotation.share_by_default(g.members, providers)
+        if settings.ai_share_by_default
+        else g.members
+    )
+    members = await rotation.order(g.id, pool, agent_id, task_id)
     for i, member in enumerate(members):
         p = providers.get(member["provider_id"])
         model_id = member["model_id"]

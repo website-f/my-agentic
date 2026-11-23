@@ -47,4 +47,7 @@ MS_MINE: dict[str, str] = {
     "Read an email": "Baca e-mel",
     "Draft an email": "Draf e-mel",
     "Send an email": "Hantar e-mel",
+    "I could not attach {name} here. It is in your files in the app.": (
+        "Saya tidak dapat melampirkan {name} di sini. Ia ada dalam fail anda di aplikasi."
+    ),
 }

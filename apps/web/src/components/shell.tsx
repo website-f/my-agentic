@@ -31,7 +31,7 @@ import { useMedia } from "@/lib/use-media";
 import { useSignOut } from "@/lib/use-sign-out";
 import { ROLE_INFO } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
-import { ALL_NAV, hubOf, moreItems, NAV, sidebarItems, tabBarFor, type NavItem, type NavSection } from "@/nav";
+import { ALL_NAV, hubOf, moreItems, NAV, navItemFor, sidebarItems, tabBarFor, type NavItem, type NavSection } from "@/nav";
 
 import { openTaskComposer } from "./task-composer/store";
 import { HeaderSearch } from "./search-box";
@@ -207,8 +207,11 @@ function matches(pathname: string, to: string) {
 }
 
 function isActive(pathname: string, to: string) {
+  const hub = hubOf(to);
+  // A listed hub (Settings) shows each page as its own entry: only the page you are on is lit.
+  if (hub?.listed) return navItemFor(pathname)?.to === to;
   const item = ALL_NAV.find((n) => n.to === to);
-  const tabs = hubOf(to)?.tabs ?? [];
+  const tabs = hub?.tabs ?? [];
   return matches(pathname, to) || !!item?.also?.some((a) => matches(pathname, a)) || tabs.some((a) => a !== "/" && matches(pathname, a));
 }
 

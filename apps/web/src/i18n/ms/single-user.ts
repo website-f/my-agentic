@@ -149,4 +149,5 @@ export const SINGLE_USER: Record<string, string> = {
   "My default AI": "AI lalai saya",
   "Instructions for this chat (optional)": "Arahan untuk sembang ini (pilihan)",
   "e.g. Answer in Malay, keep it short, never promise prices.": "cth. Jawab dalam bahasa Melayu, ringkas, jangan janjikan harga.",
+  "AI providers, channels (WhatsApp, Telegram), storage and logins are in the menu under Settings.": "Penyedia AI, saluran (WhatsApp, Telegram), storan dan log masuk ada dalam menu di bawah Tetapan.",
 };

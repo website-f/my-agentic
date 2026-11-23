@@ -203,3 +203,22 @@ async def health_of(provider_id: str, model_id: str) -> Health:
         return Health.parse(await valkey().hgetall(_health_key(provider_id, model_id)))
     except Exception:  # noqa: BLE001
         return Health()
+
+
+def share_by_default(
+    members: list[dict[str, Any]], providers: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """My Agentic: when the owner marked no member as shared, every cloud member takes turns
+    (each provider added gets work); local models (tier "local") keep their place after them.
+    A group where the owner ticked "share" on some members is left exactly as they set it."""
+    if any(m.get("shared") for m in members):
+        return members
+
+    def local(m: dict[str, Any]) -> bool:
+        p = providers.get(m.get("provider_id"))
+        return p is not None and getattr(p, "tier", "") == "local"
+
+    cloud = [{**m, "shared": True} for m in members if not local(m)]
+    if len(cloud) < 2:
+        return members
+    return cloud + [m for m in members if local(m)]

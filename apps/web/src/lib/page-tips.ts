@@ -285,7 +285,7 @@ export const PAGE_TIPS: Record<string, Partial<Record<Audience, Tip>>> = {
     },
     manager: {
       what: msg("Your account and the office's settings."),
-      steps: [msg("Set your language and how your AI speaks."), msg("Members, AI use, storage and approval limits are in the menu under Settings.")],
+      steps: [msg("Set your language and how your AI speaks."), msg("AI providers, channels (WhatsApp, Telegram), storage and logins are in the menu under Settings.")],
     },
   },
   "/settings/ai-use": {

@@ -700,3 +700,35 @@ async def waha_phone_of(cfg: Config, lid: str) -> str:
     except WhatsAppError:
         return ""
     return str((data or {}).get("pn") or "")
+
+
+async def waha_send_file(
+    cfg: Config,
+    chat_id: str,
+    data: bytes,
+    mime: str,
+    filename: str,
+    caption: str = "",
+    reply_to: str = "",
+) -> str:
+    """My Agentic: send a document (a PDF, a spreadsheet...) into a chat as a WhatsApp file."""
+    body: dict[str, Any] = {
+        "session": cfg.session,
+        "chatId": waha_chat_id(chat_id),
+        "file": {
+            "mimetype": mime or "application/octet-stream",
+            "filename": filename[:200] or "file",
+            "data": base64.b64encode(data).decode(),
+        },
+        "caption": (caption[:1000] + MARK) if caption else MARK,
+    }
+    if reply_to:
+        body["reply_to"] = reply_to
+    headers = {"X-Api-Key": cfg.api_key} if cfg.api_key else {}
+    async with _client(timeout=120) as c:  # a large file takes a while to upload
+        r = await c.post(cfg.base_url.rstrip("/") + "/api/sendFile", json=body, headers=headers)
+    if r.status_code >= 400:
+        raise WhatsAppError(f"WAHA answered {r.status_code}: {r.text[:200]}", r.status_code)
+    data_out = r.json() if r.content and "json" in r.headers.get("content-type", "") else {}
+    mid = (data_out or {}).get("id", "")
+    return str(mid.get("_serialized", "") if isinstance(mid, dict) else mid)

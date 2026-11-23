@@ -360,4 +360,69 @@ async def test_off_rule_keeps_the_ai_quiet_and_the_page_saves_rules(client, monk
     assert called == []
 
 
+async def test_owner_in_a_group_gets_the_chat_history_and_the_pdf_it_asked_for(client, monkeypatch):
+    from agentic.models import Agent, Branch, DocFile
+
+    ch_id, owner_id = await _wa_setup(client)
+    async with SessionLocal() as db:
+        ws_id = (await db.get(Channel, ch_id)).workspace_id
+        branch = await db.scalar(select(Branch).where(Branch.workspace_id == ws_id))
+        agent = Agent(workspace_id=ws_id, branch_id=branch.id, name="Chief", role="Assistant", slug="chief", owner_user_id=owner_id, private=True)
+        db.add(agent)
+        await db.commit()
+        agent_id = agent.id
+
+    history = [
+        {"id": "m1", "from_me": False, "sender": "60133334444@c.us", "sender_name": "Ali", "text": "We need 10 chairs and 5 desks", "at": "2026-11-24T01:00:00+00:00", "media": None},
+        {"id": "false_120363@g.us_ABC", "from_me": False, "sender": "60122223333@c.us", "sender_name": "Boss", "text": "@60111000111 quote please", "at": "2026-11-24T01:01:00+00:00", "media": None},
+    ]
+
+    async def fake_messages(cfg, chat_id, limit=50):
+        assert chat_id == "120363000@g.us"
+        return history
+
+    async def fake_status(cfg):
+        return {"status": "WORKING", "me": ME}
+
+    sent_files: list[dict] = []
+
+    async def fake_send_file(cfg, chat_id, data, mime, filename, caption="", reply_to=""):
+        sent_files.append({"chat": chat_id, "data": data, "mime": mime, "name": filename, "reply_to": reply_to})
+        return "f1"
+
+    seen_text: list[str] = []
+
+    class Reply:
+        content = "Here is your quotation."
+        message_id = None
+
+    async def fake_turn(db, agent, session, text):
+        seen_text.append(text)
+        db.add(DocFile(workspace_id=agent.workspace_id, agent_id=agent.id, name="QT-0001.pdf", mime="application/pdf", size=9, data=b"%PDF-1.4 q", status="ready", source="generated", created_by=f"agent:{agent.id}"))
+        await db.commit()
+        return Reply()
+
+    async def no_send(db, did):
+        return None
+
+    monkeypatch.setattr(whatsapp, "waha_messages", fake_messages)
+    monkeypatch.setattr(whatsapp, "waha_status", fake_status)
+    monkeypatch.setattr(whatsapp, "waha_send_file", fake_send_file)
+    monkeypatch.setattr(wa_bot.runtime, "chat_turn", fake_turn)
+    monkeypatch.setattr(deliver, "deliver", no_send)
+
+    (msg,) = whatsapp.parse_waha(_group_payload("@60111000111 quote please", mention=["60111000111@c.us"]))
+    async with SessionLocal() as db:
+        ch = await db.get(Channel, ch_id)
+        await wa_bot.handle(db, ch, msg)
+
+    (text,) = seen_text
+    assert "We need 10 chairs and 5 desks" in text and "<<<" in text  # the group's history, fenced
+    assert text.count("quote please") == 1  # the ask itself is not repeated as history
+    (f,) = sent_files
+    assert f["chat"] == "120363000@g.us" and f["name"] == "QT-0001.pdf" and f["data"] == b"%PDF-1.4 q"
+    assert f["reply_to"] == msg.message_id
+    assert agent_id
+
+
 _ = (BytesParser, policy)
