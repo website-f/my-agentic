@@ -70,6 +70,11 @@ async def test_deep_research_checks_timing_reads_pages_and_finds_videos(monkeypa
     assert out.startswith("Deep research done (2 lines of research")
     assert "Bottom line: go to the river park" in out
     assert "Caution" in out  # the page tried to give instructions
+    # the app adds the real links: the videos (TikTok, YouTube) and the page cited as [2]
+    assert "Video links:" in out and "TikTok: Hidden river BBQ spot\nhttps://www.tiktok.com/@a/video/1" in out
+    assert "https://www.youtube.com/watch?v=abc" in out
+    assert "[2] Article: best BBQ outing spots for 10 people Selangor 2026 - https://news.example.com/" in out
+    assert "Sources: [1] [2]" not in out  # the AI's own list was replaced
 
 
 async def test_deep_research_needs_a_question():

@@ -30,7 +30,7 @@ from .tools import Tool, ToolContext, _threat_note
 
 log = logging.getLogger("agentic.agents.deep_research")
 
-MAX_SUBS = 6
+MAX_SUBS = 7
 PAGES_PER_SUB = 5
 VIDEO_SITES = {
     "tiktok": ("tiktok.com",),
@@ -45,10 +45,12 @@ PLAN_SYSTEM = (
     "You plan web research. Answer with JSON only, no prose. Shape: "
     '{"sub_questions": [{"q": "a web search query", "why": "what it settles"}], '
     '"video_queries": ["a short query for short videos"], "language": "en or ms or another"}. '
-    "Rules: 3 to 6 sub_questions, the most decisive first. When timing, a date or a season "
-    "matters (travel, outings, events, buying, planting...), the FIRST sub-question checks "
-    "it for the actual dates (weather and season such as monsoon or haze, public and school "
-    "holidays, closures, peak crowds, booking lead time). Then cover the options, prices and "
+    "Rules: 3 to 7 sub_questions, the most decisive first. For anything outdoors or travel "
+    "(outings, trips, BBQ, events, sport, planting...), the FIRST sub-question checks the "
+    "WEATHER AND SEASON for that place and those dates (rain, monsoon, haze, heat, floods, "
+    "sea conditions) and the SECOND checks public and school holidays, closures and peak "
+    "crowds. For other timed questions (buying, launching, applying) check what timing "
+    "changes (sales, deadlines, prices). Then cover the options, prices and "
     "logistics, rules or limits (e.g. whether BBQ is allowed, group size), and what is new, "
     "trending or viral this year. Put the location and the year in the queries. "
     "video_queries: 0 to 3 queries when short videos would help the person decide (places, "
@@ -65,9 +67,12 @@ WRITE_SYSTEM = (
     "Timing check (is the date suitable, and why); Top options (3-5, each with why it fits, "
     "a rough cost for the group, rules such as BBQ allowed, how to book); Suggested plan; "
     "Videos to watch (the given video links, each with one line on what it shows); "
-    "Watch-outs; Sources. For other research use: Bottom line; Key findings; Options or "
-    "comparison; Recommendation; Open questions; Sources. Only list video links that are in "
-    "the evidence, never invent a link."
+    "Watch-outs. For other research use: Bottom line; Key findings; Options or comparison; "
+    "Recommendation; Open questions. The Timing check says plainly whether the date is a good "
+    "idea, covering weather or season as well as holidays and crowds. Leave out evidence "
+    "about other countries or places than the person's unless they asked for them. In "
+    "Videos to watch, give each as: title - what it shows [n]. Do NOT write a Sources or "
+    "links section and never type a URL: the app adds the real links after your text."
 )
 
 
@@ -133,6 +138,7 @@ async def plan(ctx: ToolContext, question: str) -> dict[str, Any]:
 async def _one(ctx: ToolContext, sub: dict[str, str]) -> dict[str, Any]:
     """Search one sub-question and read its best pages: passages with their sources."""
     from . import research_tools  # here: research_tools imports tools, which imports this
+
     try:
         _, results = await websearch.search(
             sub["q"], 6, agent_id=ctx.agent.id if ctx.agent is not None else None
@@ -175,14 +181,16 @@ async def _videos(ctx: ToolContext, query: str) -> list[dict[str, str]]:
     return out
 
 
-def _evidence(found: list[dict[str, Any]], videos: list[dict[str, str]]) -> tuple[str, list[str]]:
-    """Numbered sources and the text the writer reads; each source once."""
-    sources: list[str] = []
+def _evidence(
+    found: list[dict[str, Any]], videos: list[dict[str, str]]
+) -> tuple[str, list[tuple[str, str]]]:
+    """Numbered sources (title, url) and the text the writer reads; each source once."""
+    sources: list[tuple[str, str]] = []
     index: dict[str, int] = {}
 
     def num(title: str, url: str) -> int:
         if url not in index:
-            sources.append(f"{title or url} - {url}")
+            sources.append(((title or url)[:120], url))
             index[url] = len(sources)
         return index[url]
 
@@ -229,15 +237,46 @@ async def research(ctx: ToolContext, question: str, people_note: str = "") -> st
         "research.write",
         REPORT_TOKENS,
     )
-    links = "\n".join(f"[{i}] {s}" for i, s in enumerate(sources, 1))
-    if "Sources" not in report[-max(400, len(links) + 200) :]:
-        report = f"{report}\n\nSources:\n{links}"
+    report = with_links(report, sources, videos)
     plan_line = "; ".join(s["q"] for s in p["subs"])
     return (
         f"Deep research done ({len(p['subs'])} lines of research: {plan_line}; "
         f"{len(sources)} sources, {len(videos)} video links). Give the person this report, "
         f"keeping its sections, links and [n] citations:{_threat_note(evidence)}\n\n{report}"
     )
+
+
+_SOURCES_HEAD = re.compile(r"\n\s*[#*_ ]*(sources|sumber|references|links)\b[*_ ]*:?[^\n]*(\n|$)", re.I)
+SITE_NAMES = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram"}
+MAX_VIDEO_LINKS = 9
+
+
+def with_links(report: str, sources: list[tuple[str, str]], videos: list[dict[str, str]]) -> str:
+    """The report with the real links added by the app (never typed by the AI): the video
+    links (the ones it cited first, then the rest) and the pages it cited."""
+    heads = list(_SOURCES_HEAD.finditer(report))
+    if heads and heads[-1].start() > len(report) // 2:
+        report = report[: heads[-1].start()].rstrip()  # the AI's own list goes; ours is real
+    cited = {int(n) for n in re.findall(r"\[(\d{1,3})\]", report) if 0 < int(n) <= len(sources)}
+    video_of = {v["url"]: v for v in videos}
+    vids = [n for n in sorted(cited) if sources[n - 1][1] in video_of]
+    rest = [i for i, (_, url) in enumerate(sources, 1) if url in video_of and i not in vids]
+    picked = (vids + rest)[:MAX_VIDEO_LINKS]
+    out = [report]
+    if picked:
+        lines = []
+        for n in picked:
+            title, url = sources[n - 1]
+            site = SITE_NAMES.get(video_of[url]["site"], video_of[url]["site"])
+            lines.append(f"[{n}] {site}: {title}\n{url}")
+        out.append("Video links:\n" + "\n".join(lines))
+    pages = [n for n in sorted(cited) if n not in picked]
+    if pages:
+        out.append(
+            "Sources:\n"
+            + "\n".join(f"[{n}] {sources[n - 1][0]} - {sources[n - 1][1]}" for n in pages)
+        )
+    return "\n\n".join(out)
 
 
 async def _deep_research(ctx: ToolContext, args: dict[str, Any]) -> str:
