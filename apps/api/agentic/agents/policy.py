@@ -60,6 +60,7 @@ OUTSIDE_CONTENT = frozenset(
         "web_fetch",
         "web_search",
         "research_gather",
+        "deep_research",
         "read_file",
         "view_image",
         "tool_call",

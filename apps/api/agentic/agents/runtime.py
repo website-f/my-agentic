@@ -387,7 +387,12 @@ def _parse_args(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
 
 # P39: research reads up to a dozen pages and may re-read failed ones in the agent's own
 # browser; web_fetch may fall back to the browser too.
-SLOW_TOOLS = {"research_gather": 150, "web_fetch": 90, "web_search": 90}
+SLOW_TOOLS = {
+    "research_gather": 150,
+    "deep_research": 300,  # My Agentic: several searches, page reads and two AI calls
+    "web_fetch": 90,
+    "web_search": 90,
+}
 
 
 async def owner_asks(
@@ -2119,6 +2124,17 @@ class ChatReply:
 
 BACKUP_NOTE = "(Backup mode: the main AI is unavailable, so a small local model answered.)"
 
+# My Agentic: a WhatsApp conversation (channels/wa_bot.py names its session this way) gets the
+# files the agent makes, or names by id, attached to the chat right after its answer
+# (wa_bot._send_files). The agent must know, or it says it cannot send files and makes them again.
+WHATSAPP_TITLE = "WhatsApp chat "
+WHATSAPP_FILES_NOTE = (
+    "[Channel: WhatsApp. Any file you create in this turn, or name by its id (fl_...), is sent "
+    "into this chat automatically as a WhatsApp document right after your reply. So say the "
+    "file is attached here (name it); never say you cannot attach or send files in this chat, "
+    "and do not create a file again just to send it: naming its id is enough.]"
+)
+
 
 async def _backup_reply(
     db: AsyncSession, ws: Workspace, agent: Agent, history: list[AgentMessage]
@@ -2369,6 +2385,8 @@ async def _chat_turn(
     voice = await prefs.voice(db, session.user_id, text, lang=explicit_lang(), pick=pick)
     note = lang_notes.turn_note(voice, text)
     block = f"{block}\n\n{note}" if block else note
+    if (session.title or "").startswith(WHATSAPP_TITLE):
+        block = f"{block}\n\n{WHATSAPP_FILES_NOTE}" if block else WHATSAPP_FILES_NOTE
     ctx = ToolContext(
         db=db, agent=agent, workspace=ws, task=None, person=session.user_id, session_id=session.id
     )

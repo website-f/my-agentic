@@ -29,7 +29,7 @@ REQUEST_EVERY = 300  # seconds: one "wanted to use" record per service per 5 min
 
 # Tools that reach an outside service, by the service they need.
 TOOL_SERVICE: dict[str, str] = {
-    **{n: "web" for n in ("web_search", "web_fetch", "research_gather")},
+    **{n: "web" for n in ("web_search", "web_fetch", "research_gather", "deep_research")},
     **{
         n: "m365"
         for n in (

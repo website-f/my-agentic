@@ -1354,6 +1354,7 @@ FOLLOWS = {
     # research_gather reads pages too: an agent set to ask (or deny) before web_fetch gets the
     # same answer here instead of a side door.
     "research_gather": "web_fetch",
+    "deep_research": "web_fetch",  # My Agentic: it reads pages too
     # P25: document search reads the same office documents as the library.
     "search_documents": "search_library",
 }
@@ -1506,6 +1507,11 @@ TOOLS.update({t.name: t for t in TASK_TOOLS})
 from .research_tools import RESEARCH_TOOLS  # noqa: E402
 
 TOOLS.update({t.name: t for t in RESEARCH_TOOLS})
+
+# My Agentic: deep research (plan, check timing, read many pages, video links, summary).
+from .deep_research import DEEP_RESEARCH_TOOLS  # noqa: E402
+
+TOOLS.update({t.name: t for t in DEEP_RESEARCH_TOOLS})
 
 # P24: what documents the agent's company has (folders, kinds, files; held-back ones counted).
 from .company_tools import COMPANY_TOOLS  # noqa: E402

@@ -50,4 +50,5 @@ MS_MINE: dict[str, str] = {
     "I could not attach {name} here. It is in your files in the app.": (
         "Saya tidak dapat melampirkan {name} di sini. Ia ada dalam fail anda di aplikasi."
     ),
+    "Deep research on the web": "Penyelidikan mendalam di web",
 }

@@ -4,6 +4,7 @@
 The IMAP server, SMTP server, WAHA and the AI are fakes; nothing real is called."""
 
 import json
+
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -20,6 +21,7 @@ from agentic.mailbox.models import WaChatRule
 from agentic.models import Channel, ChannelLink, Delivery, Membership
 
 from .conftest import csrf, setup_owner
+from .test_agents import llm, temporal  # noqa: F401  (fixtures)
 
 
 def _mail(subject: str, sender: str, date: str, body: str = "Hello there", attach: bool = False) -> bytes:
@@ -423,6 +425,29 @@ async def test_owner_in_a_group_gets_the_chat_history_and_the_pdf_it_asked_for(c
     assert f["chat"] == "120363000@g.us" and f["name"] == "QT-0001.pdf" and f["data"] == b"%PDF-1.4 q"
     assert f["reply_to"] == msg.message_id
     assert agent_id
+
+
+async def test_a_whatsapp_chat_tells_the_agent_its_files_are_attached(client, llm, temporal):
+    from agentic.agents import runtime
+    from agentic.models import Agent, ChatSession
+
+    from .test_agents import new_agent, office
+
+    o = await office(client)
+    a = await new_agent(client, o, "Chief", "Management")
+    async with SessionLocal() as db:
+        owner = await db.scalar(select(Membership).where(Membership.role == "owner"))
+        agent = await db.get(Agent, a["id"])
+        wa = ChatSession(workspace_id=agent.workspace_id, agent_id=agent.id, user_id=owner.user_id, title="WhatsApp chat 60122223333@c.us")
+        web = ChatSession(workspace_id=agent.workspace_id, agent_id=agent.id, user_id=owner.user_id, title="Quotes")
+        db.add_all([wa, web])
+        await db.commit()
+        llm.say("Here it is.").say("Here it is.")
+        await runtime.chat_turn(db, agent, wa, "send me the quotation pdf")
+        await runtime.chat_turn(db, agent, web, "send me the quotation pdf")
+    on_wa, on_web = (json.dumps(r["messages"]) for r in llm.requests[-2:])
+    assert "sent into this chat automatically as a WhatsApp document" in on_wa
+    assert "WhatsApp document" not in on_web
 
 
 _ = (BytesParser, policy)

@@ -34,7 +34,9 @@ def _transcript(task: Task | None, msgs: list[AgentMessage]) -> str:
     return "\n\n".join(out)
 
 
-RESEARCH_TOOLS = frozenset({"research_gather", "web_search", "web_fetch", "browser_read"})
+RESEARCH_TOOLS = frozenset(
+    {"research_gather", "deep_research", "web_search", "web_fetch", "browser_read"}
+)
 MIN_FINDINGS = 200
 MAX_SOURCES = 15
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
