@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import re
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -360,8 +361,25 @@ CUT_NUDGE = (
 CUT_NOTE = "(Note: this answer was cut off at the length limit and may be incomplete.)"
 
 
+# My Agentic: the same in Malay and the "please wait" kind ("aku akan buat ... tunggu sekejap").
+_PROMISE_MORE = re.compile(
+    r"\b(aku|saya|kami|i)\s+akan\s+(buat|buatkan|siapkan|hantar|upload|attach|sediakan|kira|"
+    r"semak|baca|generate|jana|cari|update|kemas\s*kini)\b|\btunggu\s+(sekejap|kejap|jap|"
+    r"sebentar|ya)\b|\b(give me a (moment|minute|few minutes)|please wait|wait a (moment|"
+    r"minute|bit)|hold on|one moment)\b",
+    re.I,
+)
+CHAT_WORK_NUDGE = (
+    "Your reply promises work, but nothing happens after a chat reply: the person would wait "
+    "forever. Do the work now with your tools in this same turn and then answer with the "
+    "result. If it is long (many files or steps), start it with work_in_background and say "
+    "so. Do not promise again."
+)
+
+
 def promises_more_work(text: str | None) -> bool:
-    return bool(_PROMISE.search((text or "").replace("\u2019", "'")))
+    t = (text or "").replace("\u2019", "'")
+    return bool(_PROMISE.search(t) or _PROMISE_MORE.search(t))
 
 
 def ends_with_question(text: str | None) -> bool:
@@ -389,7 +407,8 @@ def _parse_args(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
 # browser; web_fetch may fall back to the browser too.
 SLOW_TOOLS = {
     "research_gather": 150,
-    "deep_research": 240,  # My Agentic: two rounds of searches and reads, three AI calls
+    "deep_research": 240,
+    "copy_file_with_changes": 150,  # My Agentic: a long PDF is searched and redrawn page by page
     "web_fetch": 90,
     "web_search": 90,
 }
@@ -411,8 +430,30 @@ async def owner_asks(
     return person == agent.owner_user_id
 
 
+# My Agentic: tools held back for this turn (someone else on the owner's WhatsApp asked:
+# channels/wa_bot sets it for the "assistant" access level). Not offered, and refused if called.
+TURN_DENY: ContextVar[frozenset[str]] = ContextVar("turn_deny", default=frozenset())
+
+
+def private_tools() -> frozenset[str]:
+    """The owner's own things: mail, the inbox, Teams, their computer, calendar, saved logins
+    and the office overview their private assistant sees."""
+    from ..assistants.names import ASSISTANT_ONLY
+    from .inbox_tools import INBOX_TOOLS
+
+    return frozenset(
+        {*MAIL_TOOLS, *TEAMS_TOOLS, *PC_TOOLS, *ASSISTANT_ONLY, *(t.name for t in INBOX_TOOLS)}
+        | {"browser_login", "save_format", "work_in_background"}
+    )
+
+
 async def run_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str:
     limit = SLOW_TOOLS.get(name, TOOL_TIMEOUT)
+    if name in TURN_DENY.get():
+        return (
+            "Error: the person asking is not the owner, and this tool uses the owner's private "
+            "things. Help them without it, or say the owner must ask."
+        )
     if (name in PC_TOOLS or name in MAIL_TOOLS or name in TEAMS_TOOLS) and not await owner_asks(
         ctx.db, ctx.agent, ctx.task, ctx.person
     ):
@@ -567,8 +608,9 @@ def offered_tools(
     linked computer). The Outlook tools (P34) only when `mail` (microsoft.access.mail_ready:
     its person's own Outlook, or a shared mailbox assigned to it)."""
     out = []
+    held = TURN_DENY.get()
     for n, mode in modes_for(agent).items():
-        if mode == "deny" or n in GLOBAL_DENY:
+        if mode == "deny" or n in GLOBAL_DENY or n in held:
             continue
         if n in MCP_BRIDGE and not mcp:
             continue
@@ -1683,6 +1725,18 @@ async def finish(task_id: str, state: str, message: str | None) -> dict[str, Any
         return await _finish(task_id, state, message)
 
 
+async def _to_chat(
+    db: AsyncSession, task: Task, agent: Agent, ok: bool, message: str | None
+) -> None:
+    """My Agentic: a background job started from a WhatsApp chat reports back there."""
+    try:
+        from ..channels import wa_bot
+
+        await wa_bot.deliver_task_result(db, task, agent, ok, message or "")
+    except Exception:  # noqa: BLE001 - the task is settled either way
+        log.warning("could not post task %s back to its chat", task.id, exc_info=True)
+
+
 async def _finish(task_id: str, state: str, message: str | None) -> dict[str, Any] | None:
     from ..teams import blockers, review  # late: they import this module
     from . import browser_tools  # late: it imports this module
@@ -1761,6 +1815,7 @@ async def _finish(task_id: str, state: str, message: str | None) -> dict[str, An
             )
             if not reviewing:
                 await _tell_person_done(db, task, agent, status)
+                await _to_chat(db, task, agent, True, message)
         elif state == "cancelled":
             for a in (
                 await db.scalars(
@@ -1797,6 +1852,7 @@ async def _finish(task_id: str, state: str, message: str | None) -> dict[str, An
                 blocked_reason=None,
             )
             await _tell_owner_it_failed(db, task, agent, message)
+            await _to_chat(db, task, agent, False, message)
         await agent_status(agent, "error" if state not in ("done", "cancelled") else "idle", task)
         # P21: act on a reviewer's verdict, and move on the work that waits for this task.
         try:
@@ -2401,6 +2457,8 @@ async def _chat_turn(
     # the agent asked for confirmation is the confirmation.
     outside_read = await _outside_seen(db, session.id, asked.id)
     confirmed = outside_read and await _confirms(db, session.id, asked.id, text)
+    work_tail: list[dict[str, Any]] = []  # a promised-but-not-done reply, sent back once
+    nudged_work = False
     for round_no in range(CHAT_ROUNDS):
         # The last round offers no tools: the agent answers from what it has found so far,
         # instead of the person getting "could not finish" after real work was done.
@@ -2427,6 +2485,7 @@ async def _chat_turn(
             pinned_first=False,
             extra={asked.id: block} if block else None,
         )
+        messages += work_tail  # My Agentic: a promise sent back to be done (not saved)
         if last:
             messages.append({"role": "user", "content": FINAL_ROUND})
         tools = (
@@ -2491,6 +2550,20 @@ async def _chat_turn(
             reply = backup
         finally:
             await agent_thinking(agent, False)
+        if (
+            not reply.tool_calls
+            and not nudged_work
+            and round_no < CHAT_ROUNDS - 2
+            and promises_more_work(reply.content)
+        ):
+            # My Agentic: "aku akan buat ... tunggu sekejap" ends the turn with nothing done
+            # and the person waits forever. Send it back once to do the work now.
+            nudged_work = True
+            work_tail = [
+                {"role": "assistant", "content": reply.content or ""},
+                {"role": "user", "content": CHAT_WORK_NUDGE},
+            ]
+            continue
         if not reply.tool_calls and (reply.content or "").strip():
             if reuse and not reply.truncated and BACKUP_NOTE not in reply.content:
                 await answers.keep(
@@ -2524,6 +2597,7 @@ async def _chat_turn(
             tool_calls=reply.tool_calls,
         )
         await db.commit()
+        work_tail = []  # it is working: the saved tool calls carry on from here
         for call in reply.tool_calls:
             fn = call.get("function") or {}
             name = str(fn.get("name", ""))

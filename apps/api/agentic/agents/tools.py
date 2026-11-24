@@ -1525,6 +1525,11 @@ from .doc_formats import DOC_FORMAT_TOOLS  # noqa: E402
 
 TOOLS.update({t.name: t for t in DOC_FORMAT_TOOLS})
 
+# My Agentic: edit the person's files in place, remember formats, background jobs.
+from .file_edit_tools import FILE_EDIT_TOOLS  # noqa: E402
+
+TOOLS.update({t.name: t for t in FILE_EDIT_TOOLS})
+
 # P24: what documents the agent's company has (folders, kinds, files; held-back ones counted).
 from .company_tools import COMPANY_TOOLS  # noqa: E402
 

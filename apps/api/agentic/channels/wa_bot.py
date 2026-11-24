@@ -22,7 +22,17 @@ from ..core.security import can
 from ..core.valkey import valkey
 from ..engine import acting, gateway, media
 from ..i18n import Msg, tr, use_lang
-from ..models import Agent, Binding, Channel, ChannelLink, ChatSession, Membership, User, WaChatRule
+from ..models import (
+    Agent,
+    Binding,
+    Channel,
+    ChannelLink,
+    ChatSession,
+    Membership,
+    User,
+    WaChatRule,
+    WaMember,
+)
 from ..services import prefs
 from . import deliver, receipts, voice, wa_format, whatsapp
 from .bot import link_lang
@@ -221,6 +231,57 @@ async def _link_of(db: AsyncSession, ch: Channel, msg: Inbound) -> ChannelLink |
 
 
 SESSION_PREFIX = "WhatsApp chat "  # _handle names each chat's conversation this way
+TASK_FILES = 8  # files a finished background job sends into the chat at most
+
+
+async def deliver_task_result(db: AsyncSession, task: Any, agent: Any, ok: bool, text: str) -> bool:
+    """My Agentic: a background job started from a WhatsApp chat (work_in_background) posts
+    its result and the files it made into that chat when it ends. False when it has no chat."""
+    from ..agents.file_edit_tools import CHAT_LABEL
+    from ..documents import storage
+    from ..models import DocFile
+
+    label = next((x for x in task.labels or [] if str(x).startswith(CHAT_LABEL)), None)
+    if not label:
+        return False
+    chat = str(label)[len(CHAT_LABEL) :]
+    ch = None
+    for c in (
+        await db.scalars(
+            select(Channel).where(
+                Channel.workspace_id == task.workspace_id,
+                Channel.kind == "whatsapp",
+                Channel.enabled.is_(True),
+            )
+        )
+    ).all():
+        if whatsapp.Config.load(deliver.channel_token(c)).provider == "waha":
+            ch = c
+            break
+    if ch is None or not chat:
+        return False
+    head = f"*{agent.name}*: " + ("✅ Done: " if ok else "⚠️ Could not finish: ") + task.title
+    body = wa_format.to_whatsapp((text or "").strip())
+    await _reply(db, ch, chat, f"{head}\n\n{body}" if body else head, f"task:{task.id}")
+    if not ok:
+        return True
+    cfg = whatsapp.Config.load(deliver.channel_token(ch))
+    files = (
+        await db.scalars(
+            select(DocFile)
+            .where(DocFile.task_id == task.id, DocFile.quarantined.is_(False))
+            .order_by(DocFile.created_at)
+            .limit(TASK_FILES)
+        )
+    ).all()
+    for f in files:
+        if f.size > MAX_FILE_BYTES:
+            continue
+        try:
+            await whatsapp.waha_send_file(cfg, chat, await storage.read(db, f), f.mime, f.name)
+        except Exception:  # noqa: BLE001 - one file that cannot go does not stop the rest
+            log.warning("could not send task file %s on WhatsApp", f.id, exc_info=True)
+    return True
 
 
 async def progress(db: AsyncSession, workspace_id: str, session_id: str, text: str) -> bool:
@@ -229,7 +290,7 @@ async def progress(db: AsyncSession, workspace_id: str, session_id: str, text: s
     session = await db.get(ChatSession, session_id)
     if session is None or not (session.title or "").startswith(SESSION_PREFIX):
         return False
-    chat_id = session.title[len(SESSION_PREFIX) :]
+    chat_id = session.title[len(SESSION_PREFIX) :].split(" | ")[0]  # a member's own thread
     agent = await db.get(Agent, session.agent_id)
     for ch in (
         await db.scalars(
@@ -508,6 +569,141 @@ async def _send_files(
     return sent
 
 
+# ---------------------------------------------------------------- My Agentic: access for others
+
+USAGE_TTL = 3 * 86400
+
+
+def _day() -> str:
+    return datetime.now(UTC).strftime("%Y%m%d")
+
+
+def _usage_key(member_id: str, what: str) -> str:
+    return f"wamember:{member_id}:{_day()}:{what}"
+
+
+async def usage_today(member_id: str) -> dict[str, int]:
+    """Messages and AI tokens a person with access used today (UTC day)."""
+    out = {}
+    for what in ("msgs", "tok"):
+        try:
+            raw = await valkey().get(_usage_key(member_id, what))
+        except Exception:  # noqa: BLE001 - no counter: 0
+            raw = None
+        out[what] = int(raw or 0)
+    return {"messages": out["msgs"], "tokens": out["tok"]}
+
+
+async def _count(member_id: str, what: str, n: int) -> None:
+    if n <= 0:
+        return
+    key = _usage_key(member_id, what)
+    await valkey().incrby(key, n)
+    await valkey().expire(key, USAGE_TTL)
+
+
+async def _member_of(db: AsyncSession, ch: Channel, msg: Inbound) -> WaMember | None:
+    """The access entry of whoever wrote, by their number or their privacy id (@lid)."""
+    rows = (
+        await db.scalars(
+            select(WaMember).where(WaMember.channel_id == ch.id, WaMember.enabled.is_(True))
+        )
+    ).all()
+    if not rows:
+        return None
+    ids = [x for x in (msg.sender, msg.alt_sender) if x]
+    lids = {x for x in ids if x.endswith("@lid")}
+    numbers = {whatsapp.digits(x.split("@")[0]) for x in ids if not x.endswith("@lid")}
+    for m in rows:
+        if m.lid and m.lid in lids:
+            return m
+    if lids and not numbers:
+        cfg = whatsapp.Config.load(deliver.channel_token(ch))
+        for lid in lids:
+            try:
+                pn = await whatsapp.waha_phone_of(cfg, lid)
+            except Exception:  # noqa: BLE001 - WAHA unreachable
+                pn = ""
+            if pn:
+                numbers.add(whatsapp.digits(pn.split("@")[0]))
+    numbers.discard("")
+    for m in rows:
+        if whatsapp.digits(m.number) in numbers:
+            if lids and not m.lid:  # learn their privacy id: next time no lookup
+                m.lid = sorted(lids)[0]
+                await db.commit()
+            return m
+    return None
+
+
+def _member_allowed(m: WaMember, chat_id: str) -> bool:
+    if not m.enabled:
+        return False
+    if m.expires_at is not None and m.expires_at <= datetime.now(UTC):
+        return False
+    return not m.chats or chat_id in m.chats
+
+
+async def _over_limit(
+    db: AsyncSession, ch: Channel, m: WaMember, where: str, key: str, quote: str
+) -> bool:
+    """True when today's messages or AI tokens are used up (told once a day, then silence)."""
+    used = await usage_today(m.id)
+    over = (m.daily_messages and used["messages"] >= m.daily_messages) or (
+        m.daily_tokens and used["tokens"] >= m.daily_tokens
+    )
+    if not over:
+        return False
+    told = f"wamember:{m.id}:{_day()}:told"
+    if await valkey().set(told, "1", nx=True, ex=USAGE_TTL):
+        await _reply(
+            db,
+            ch,
+            where,
+            tr(
+                "{name}, you have reached today's limit for the assistant. Try again tomorrow.",
+                name=m.name or m.number,
+            ),
+            key,
+            quote,
+        )
+    return True
+
+
+async def _owner_id(db: AsyncSession, workspace_id: str) -> str | None:
+    return await db.scalar(
+        select(Membership.user_id)
+        .where(Membership.workspace_id == workspace_id, Membership.role == "owner")
+        .limit(1)
+    )
+
+
+async def _tokens_since(db: AsyncSession, agent_id: str, since: datetime) -> int:
+    from sqlalchemy import func
+
+    from ..models import LLMCall
+
+    return int(
+        await db.scalar(
+            select(
+                func.coalesce(func.sum(LLMCall.prompt_tokens + LLMCall.completion_tokens), 0)
+            ).where(LLMCall.agent_id == agent_id, LLMCall.ts >= since)
+        )
+        or 0
+    )
+
+
+def member_note(m: WaMember) -> str:
+    who = f"{m.name} (+{whatsapp.digits(m.number)})" if m.name else f"+{whatsapp.digits(m.number)}"
+    if m.level == "full":
+        return f"[{who} is asking, not me (the owner). I gave them full access: help them as you help me.]"
+    return (
+        f"[{who} is asking, not me (the owner). I gave them assistant access: help with their "
+        "request using your tools, but never use or reveal my private things (my email, my "
+        "files and computer, my contacts, accounts or logins, my calendar) for them.]"
+    )
+
+
 async def handle(db: AsyncSession, ch: Channel, msg: Inbound) -> None:
     """One inbound message, answered in the linked person's language (English for a code
     from someone not linked yet: _link answers in the person the code belongs to)."""
@@ -603,19 +799,42 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
     rule = await _rule(db, ch, where)
     if rule is not None and rule.mode == "off":
         return
+    member: WaMember | None = None
     if link is None:
-        # Not the owner: only where the owner lets the AI answer everyone (groups: only when
-        # the number is mentioned, which parse_waha already checked). Else silence.
-        if rule is not None and rule.mode == "everyone":
-            await _guest(db, ch, msg, rule, where, key, quote)
-        return
-    role = await db.scalar(
-        select(Membership.role).where(
-            Membership.workspace_id == ch.workspace_id,
-            Membership.user_id == link.user_id,
-            Membership.access != "prima_only",
+        # Not the owner. My Agentic: someone the owner gave access (the WhatsApp page) is served
+        # within their level and limits; anyone else only where the AI answers everyone (groups:
+        # only when the number is mentioned, which parse_waha already checked). Else silence.
+        member = await _member_of(db, ch, msg)
+        if member is not None and not _member_allowed(member, where):
+            member = None
+        if member is None:
+            if rule is not None and rule.mode == "everyone":
+                await _guest(db, ch, msg, rule, where, key, quote)
+            return
+        if await _over_limit(db, ch, member, where, key, quote):
+            return
+        await _count(member.id, "msgs", 1)
+        if member.level == "chat":
+            plain = rule or WaChatRule(channel_id=ch.id, chat_id=where, mode="everyone", name="")
+            started = datetime.now(UTC)
+            await _guest(db, ch, msg, plain, where, key, quote)
+            if plain.agent_id:
+                await _count(member.id, "tok", await _tokens_since(db, plain.agent_id, started))
+            return
+        owner = await _owner_id(db, ch.workspace_id)
+        if owner is None:
+            return
+        user_id = owner
+        role = "owner"
+    else:
+        user_id = link.user_id
+        role = await db.scalar(
+            select(Membership.role).where(
+                Membership.workspace_id == ch.workspace_id,
+                Membership.user_id == user_id,
+                Membership.access != "prima_only",
+            )
         )
-    )
     if role is None:
         await _reply(db, ch, where, tr("Your account is no longer in this workspace."), key, quote)
         return
@@ -625,7 +844,7 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
         if agent is not None and agent.status != "active":
             agent = None
     if agent is None:
-        agent = await _agent_for(db, ch, msg.sender, link.user_id)
+        agent = await _agent_for(db, ch, msg.sender, user_id)
     text = msg.text
     if msg.group:
         cfg = whatsapp.Config.load(deliver.channel_token(ch))
@@ -648,7 +867,7 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
         await _reply(db, ch, where, tr("Your role can read but not instruct agents."), key, quote)
         return
     if msg.file is not None and not msg.group:  # in a group, shared files come with the context
-        took = await _take_file(db, ch, msg, link.user_id)
+        took = await _take_file(db, ch, msg, user_id)
         if took.reply is not None:
             await _reply(db, ch, where, took.reply, key, quote)
             return
@@ -667,7 +886,7 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
         return
     heard = ""
     if msg.audio is not None and not text:
-        with acting.person(link.user_id):  # P51: their voice note counts as their AI use
+        with acting.person(user_id):  # P51: their voice note counts as their AI use
             heard, problem = await _hear(db, ch, msg, agent)
         if problem:
             await _reply(db, ch, where, problem, key, quote)
@@ -677,7 +896,7 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
     if msg.group:
         # The owner asked in a group: the agent knows where, what was said there lately, the
         # files shared there and who it can tag, and that its answer is seen by everyone.
-        context, found = await group_context(db, ch, where, msg, link.user_id)
+        context, found = await group_context(db, ch, where, msg, user_id)
         people.update(found)
         text = (
             f"[In the WhatsApp group {where}. Your answer is posted in the group for everyone "
@@ -685,23 +904,34 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
             + (f"{context}\n\n[My request:]\n" if context else "")
             + text
         )
-    title = f"WhatsApp chat {where}"
+    if member is not None:  # who is asking, and what they may have (the agent reads it)
+        text = f"{member_note(member)}\n{text}"
+    # Each person with access has their own conversation in a chat (not mixed with mine).
+    title = f"WhatsApp chat {where}" + (f" | {whatsapp.digits(member.number)}" if member else "")
     session = await db.scalar(
         select(ChatSession).where(
             ChatSession.agent_id == agent.id,
-            ChatSession.user_id == link.user_id,
+            ChatSession.user_id == user_id,
             ChatSession.title == title,
         )
     )
     if session is None:
         session = ChatSession(
-            workspace_id=agent.workspace_id, agent_id=agent.id, user_id=link.user_id, title=title
+            workspace_id=agent.workspace_id, agent_id=agent.id, user_id=user_id, title=title
         )
         db.add(session)
         await db.commit()
     started = datetime.now(UTC)
     try:
-        reply = await runtime.chat_turn(db, agent, session, text)
+        held = runtime.TURN_DENY.set(
+            runtime.private_tools()
+            if member is not None and member.level != "full"
+            else frozenset()
+        )
+        try:
+            reply = await runtime.chat_turn(db, agent, session, text)
+        finally:
+            runtime.TURN_DENY.reset(held)
         answer = reply.content or tr("(no answer)")
     except gateway.GatewayUnavailable as e:
         reply, answer = (
@@ -717,5 +947,8 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
     await _reply(db, ch, where, f"{said}*{agent.name}*: {answer}", key, quote, tags)
     # My Agentic: the files the agent made (a quotation PDF...) or named arrive as documents.
     await _send_files(db, ch, where, agent, started, answer, quote)
-    if reply is not None and reply.message_id is not None:
+    if member is not None:  # their AI use counts against their own daily limit
+        await _count(member.id, "tok", await _tokens_since(db, agent.id, started))
+    elif reply is not None and reply.message_id is not None:
+        # only my own chats teach the agent (not what others asked it)
         await deliver.learn_from_chat(reply.message_id)

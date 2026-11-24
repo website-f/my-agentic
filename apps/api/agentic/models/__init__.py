@@ -2360,7 +2360,12 @@ from ..erasure.models import ErasureRecord, WorkspaceExport  # noqa: E402, F401
 from ..feedback.models import Feedback, FeedbackComment  # noqa: E402, F401
 
 # P109: other email accounts and their attachment backups (agentic/mailbox/models.py).
-from ..mailbox.models import ExternalMailAccount, MailBackupJob, WaChatRule  # noqa: E402, F401
+from ..mailbox.models import (  # noqa: E402, F401
+    ExternalMailAccount,
+    MailBackupJob,
+    WaChatRule,
+    WaMember,
+)
 
 # P109b: Teams meetings made from the Microsoft 365 workspace and their Prima record.
 from ..microsoft.meeting_models import TeamsMeeting  # noqa: E402, F401

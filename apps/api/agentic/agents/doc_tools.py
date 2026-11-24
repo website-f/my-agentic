@@ -242,15 +242,27 @@ async def _list_templates(ctx: ToolContext, _: dict[str, Any]) -> str:
     if not rows:
         return "No templates. Draft a free-form document with draft_document(body=...)."
     out = []
+    saved = [t for t in rows if t.kind == "saved_format"]
+    rows = [t for t in rows if t.kind != "saved_format"]
     for t in rows:
         fields = ", ".join(
             f"{f['key']} ({f.get('type', 'text')}{', required' if f.get('required') else ''})"
             for f in t.fields or []
         )
         out.append(f"- {t.name} [{t.id}] — {t.description}\n  fields: {fields or 'none'}")
-    return (
+    text = (
         "Templates (pass the name or id to draft_document; an items field is a list of "
         "{description, qty, unit, unit_price}; dates are YYYY-MM-DD):\n" + "\n".join(out)
+    )
+    if saved:  # My Agentic: the person's own documents, kept as formats
+        text += (
+            "\n\nSaved formats (the person's own files: make a new one with "
+            "copy_file_with_changes(format=name, changes=[...]), never draft_document):\n"
+            + "\n".join(f"- {t.name} [{t.id}] — {t.description}" for t in saved)
+        )
+    return text + (
+        "\n\nIf more than one could fit what the person asked, or none clearly does, ask them "
+        "which kind they want (name the options) before making it."
     )
 
 
@@ -267,6 +279,11 @@ async def _draft_document(ctx: ToolContext, args: dict[str, Any]) -> str:
         )
         if tpl is None:
             return "Error: no such template. Use list_templates."
+        if tpl.kind == "saved_format":  # My Agentic: a person's own file, not a template
+            return (
+                f"Error: {tpl.name} is a saved format (the person's own file). Make it with "
+                f"copy_file_with_changes(format='{tpl.name}', changes=[...]) to keep its layout."
+            )
     body = args.get("body")
     if tpl is None and not str(body or "").strip():
         return "Error: give a template, or the document text as body (markdown)."

@@ -52,4 +52,13 @@ MS_MINE: dict[str, str] = {
     ),
     "Deep research on the web": "Penyelidikan mendalam di web",
     "Standard document layout": "Susun atur dokumen standard",
+    "Copy a file with changes": "Salin fail dengan perubahan",
+    "Remember a file's format": "Ingat format fail",
+    "Work on it in the background": "Buat di latar belakang",
+    "{name}, you have reached today's limit for the assistant. Try again tomorrow.": (
+        "{name}, anda telah mencapai had hari ini untuk pembantu. Cuba lagi esok."
+    ),
+    "Type the number with its country code.": "Taip nombor dengan kod negaranya.",
+    "That number has access already.": "Nombor itu sudah ada akses.",
+    "That person has no access here.": "Orang itu tiada akses di sini.",
 }

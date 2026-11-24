@@ -14,9 +14,10 @@ Only the owner uses this (single user). Messages typed here carry the invisible 
 number's own AI never answers them.
 """
 
+from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...channels import deliver, whatsapp
 from ...core.db import get_db
 from ...core.fence import fence
-from ...mailbox.models import WaChatRule
+from ...mailbox.models import WaChatRule, WaMember
 from ...models import Agent, Channel, ChannelLink
 from ...services import audit
 from ..deps import Principal, api_error, ensure_allowance, require
@@ -294,3 +295,172 @@ async def ai(
             why=str(e)[:200],
         ) from e
     return {"text": assist.clean_draft(text) if body.action == "draft" else text}
+
+
+# ---------------------------------------------------------------- My Agentic: access for others
+#
+# GET    /api/wa/members         who else may instruct the AI on this number, and today's use
+# POST   /api/wa/members         give a number access
+# PATCH  /api/wa/members/{id}    change level, limits, chats, expiry, on/off
+# DELETE /api/wa/members/{id}    take access away
+
+
+def _member_out(m: WaMember, used: dict[str, int]) -> dict[str, Any]:
+    return {
+        "id": m.id,
+        "number": m.number,
+        "name": m.name,
+        "level": m.level,
+        "daily_messages": m.daily_messages,
+        "daily_tokens": m.daily_tokens,
+        "chats": list(m.chats or []),
+        "enabled": m.enabled,
+        "expires_at": m.expires_at.isoformat() if m.expires_at else None,
+        "notes": m.notes,
+        "seen_lid": bool(m.lid),
+        "used_today": used,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+class MemberIn(BaseModel):
+    number: str = Field(min_length=6, max_length=40)
+    name: str = Field(default="", max_length=120)
+    level: Literal["chat", "assistant", "full"] = "assistant"
+    daily_messages: int = Field(default=30, ge=0, le=10_000)
+    daily_tokens: int = Field(default=200_000, ge=0, le=50_000_000)
+    chats: list[str] = Field(default_factory=list, max_length=200)
+    enabled: bool = True
+    expires_at: datetime | None = None
+    notes: str = Field(default="", max_length=500)
+
+
+class MemberPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    level: Literal["chat", "assistant", "full"] | None = None
+    daily_messages: int | None = Field(default=None, ge=0, le=10_000)
+    daily_tokens: int | None = Field(default=None, ge=0, le=50_000_000)
+    chats: list[str] | None = Field(default=None, max_length=200)
+    enabled: bool | None = None
+    expires_at: datetime | None = None
+    clear_expiry: bool = False
+    notes: str | None = Field(default=None, max_length=500)
+
+
+def _number(raw: str) -> str:
+    digits = whatsapp.digits(raw)
+    if raw.strip().startswith("0") and not raw.strip().startswith("00"):
+        digits = "6" + digits  # a Malaysian local number (012...) as 6012...
+    if not 8 <= len(digits) <= 15:
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST, "bad_number", "Type the number with its country code."
+        )
+    return digits
+
+
+async def _member(db: AsyncSession, ch: Channel, member_id: str) -> WaMember:
+    m = await db.get(WaMember, member_id)
+    if m is None or m.channel_id != ch.id:
+        raise api_error(status.HTTP_404_NOT_FOUND, "not_found", "That person has no access here.")
+    return m
+
+
+@router.get("/members")
+async def list_members(
+    principal: Principal = Depends(require("read")), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    from ...channels.wa_bot import usage_today
+
+    ch, _ = await _channel(db, principal)
+    rows = (
+        await db.scalars(
+            select(WaMember).where(WaMember.channel_id == ch.id).order_by(WaMember.created_at)
+        )
+    ).all()
+    return {"members": [_member_out(m, await usage_today(m.id)) for m in rows]}
+
+
+@router.post("/members", status_code=status.HTTP_201_CREATED)
+async def add_member(
+    body: MemberIn,
+    principal: Principal = Depends(require("read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ch, _ = await _channel(db, principal)
+    number = _number(body.number)
+    if await db.scalar(
+        select(WaMember.id).where(WaMember.channel_id == ch.id, WaMember.number == number)
+    ):
+        raise api_error(status.HTTP_409_CONFLICT, "exists", "That number has access already.")
+    m = WaMember(
+        channel_id=ch.id,
+        number=number,
+        name=body.name.strip(),
+        level=body.level,
+        daily_messages=body.daily_messages,
+        daily_tokens=body.daily_tokens,
+        chats=[c.strip() for c in body.chats if c.strip()],
+        enabled=body.enabled,
+        expires_at=body.expires_at,
+        notes=body.notes.strip(),
+    )
+    db.add(m)
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "whatsapp.member_added",
+        target=number,
+        after={"level": body.level, "chats": len(m.chats)},
+    )
+    await db.commit()
+    return _member_out(m, {"messages": 0, "tokens": 0})
+
+
+@router.patch("/members/{member_id}")
+async def change_member(
+    member_id: str,
+    body: MemberPatch,
+    principal: Principal = Depends(require("read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    from ...channels.wa_bot import usage_today
+
+    ch, _ = await _channel(db, principal)
+    m = await _member(db, ch, member_id)
+    for key in ("name", "level", "daily_messages", "daily_tokens", "enabled", "notes"):
+        value = getattr(body, key)
+        if value is not None:
+            setattr(m, key, value.strip() if isinstance(value, str) else value)
+    if body.chats is not None:
+        m.chats = [c.strip() for c in body.chats if c.strip()]
+    if body.clear_expiry:
+        m.expires_at = None
+    elif body.expires_at is not None:
+        m.expires_at = body.expires_at
+    await audit.record(
+        db,
+        principal.workspace_id,
+        principal.actor,
+        "whatsapp.member_changed",
+        target=m.number,
+        after={"level": m.level, "enabled": m.enabled},
+    )
+    await db.commit()
+    return _member_out(m, await usage_today(m.id))
+
+
+@router.delete("/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_member(
+    member_id: str,
+    principal: Principal = Depends(require("read")),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    ch, _ = await _channel(db, principal)
+    m = await _member(db, ch, member_id)
+    await audit.record(
+        db, principal.workspace_id, principal.actor, "whatsapp.member_removed", target=m.number
+    )
+    await db.delete(m)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

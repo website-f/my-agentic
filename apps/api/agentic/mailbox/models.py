@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -133,3 +134,35 @@ class WaChatRule(Timestamps, Base):
     mode: Mapped[str] = mapped_column(String(12), default="me", server_default="me")
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     instructions: Mapped[str] = mapped_column(Text, default="", server_default="")
+
+
+WA_LEVELS = ("chat", "assistant", "full")
+
+
+class WaMember(Timestamps, Base):
+    """My Agentic (0076): another WhatsApp number the owner lets instruct the AI.
+
+    level: chat = answers with no tools and no private data; assistant = the AI's tools but none
+    of the owner's private ones (mail, inbox, Teams, computer, saved logins); full = like the
+    owner. daily_messages / daily_tokens: 0 = no limit. chats: chat ids it may use (empty =
+    every chat where the AI answers). `lid`: the number's WhatsApp privacy id, learned when a
+    message from it is matched (groups often show only that)."""
+
+    __tablename__ = "wa_members"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "number", name="uq_wa_members_number"),
+        CheckConstraint(_in("level", WA_LEVELS), name="ck_wa_members_level"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("wam"))
+    channel_id: Mapped[str] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"))
+    number: Mapped[str] = mapped_column(String(40))
+    lid: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    level: Mapped[str] = mapped_column(String(12), default="assistant", server_default="assistant")
+    daily_messages: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    daily_tokens: Mapped[int] = mapped_column(Integer, default=200_000, server_default="200000")
+    chats: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str] = mapped_column(String(500), default="", server_default="")

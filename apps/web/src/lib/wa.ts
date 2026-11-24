@@ -54,6 +54,8 @@ export const waKeys = {
   chats: ["wa", "chats"] as const,
   messages: (id: string) => ["wa", "messages", id] as const,
   rule: (id: string) => ["wa", "rule", id] as const,
+  members: ["wa", "members"] as const,
+  pickChats: ["wa", "chats", "pick"] as const,
 };
 
 export const waStatusQuery = queryOptions({
@@ -93,6 +95,102 @@ export const chatAi = (id: string, action: "draft" | "summarize", instructions: 
 
 export const linkCode = (channelId: string) =>
   api<{ code: string; url: string | null; expires_in?: number }>(`/api/channels/${channelId}/link-code`, "POST");
+
+// ---------------------------------------------------------------- people with access
+
+/** What the AI may do for someone else: just talk, use its tools, or everything (like the owner). */
+export type WaLevel = "chat" | "assistant" | "full";
+
+/** Another WhatsApp number the owner lets instruct the AI, with its level and daily limits. */
+export interface WaMember {
+  id: string;
+  /** Digits only, with the country code ("60123456789"). */
+  number: string;
+  name: string;
+  level: WaLevel;
+  /** 0 = no limit. */
+  daily_messages: number;
+  /** 0 = no limit. */
+  daily_tokens: number;
+  /** Chat ids where they may use the AI; empty = every chat. */
+  chats: string[];
+  enabled: boolean;
+  expires_at: string | null;
+  notes: string;
+  /** They have messaged the number at least once (so they are recognised in groups too). */
+  seen_lid: boolean;
+  used_today: { messages: number; tokens: number };
+  created_at: string | null;
+}
+
+export interface WaMemberInput {
+  number: string;
+  name: string;
+  level: WaLevel;
+  daily_messages: number;
+  daily_tokens: number;
+  chats: string[];
+  enabled: boolean;
+  expires_at: string | null;
+  notes: string;
+}
+
+export type WaMemberPatch = Partial<Omit<WaMemberInput, "number">> & { clear_expiry?: boolean };
+
+export const membersQuery = queryOptions({
+  queryKey: waKeys.members,
+  queryFn: () => api<{ members: WaMember[] }>("/api/wa/members"),
+});
+
+/** Chats to pick from when limiting someone to some chats. */
+export const pickChatsQuery = queryOptions({
+  queryKey: waKeys.pickChats,
+  queryFn: () => api<{ chats: WaChat[] }>("/api/wa/chats?limit=100"),
+  staleTime: 60_000,
+});
+
+export const addMember = (body: WaMemberInput) => api<WaMember>("/api/wa/members", "POST", body);
+export const updateMember = (id: string, body: WaMemberPatch) => api<WaMember>(`/api/wa/members/${cid(id)}`, "PATCH", body);
+export const removeMember = (id: string) => api<void>(`/api/wa/members/${cid(id)}`, "DELETE");
+
+/** The number as the server will keep it: digits only, a local "012…" read as Malaysian (6012…). */
+export function cleanNumber(raw: string): string {
+  const s = raw.trim();
+  const digits = s.replace(/\D/g, "");
+  return s.startsWith("0") && !s.startsWith("00") ? `6${digits}` : digits;
+}
+
+/** "45k", "1.5k", "2M": a token count short enough for a list row. */
+export function shortCount(n: number): string {
+  const fmt = (v: number) => (v < 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v)));
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return `${fmt(n / 1000)}k`;
+  return `${fmt(n / 1_000_000)}M`;
+}
+
+/** How full today's allowance is, 0-100 (0 when there is no limit). */
+export const usedPct = (used: number, limit: number) => (limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
+
+/** A rough "20-40" normal answers for a daily token allowance (5k-10k tokens an answer). */
+export function answersFor(tokens: number): string {
+  const lo = Math.max(1, Math.floor(tokens / 10_000));
+  const hi = Math.max(1, Math.floor(tokens / 5_000));
+  return lo === hi ? String(lo) : `${lo}-${hi}`;
+}
+
+/** Access that ran out (its end date has passed). */
+export const isExpired = (m: Pick<WaMember, "expires_at">, now = Date.now()) => !!m.expires_at && new Date(m.expires_at).getTime() < now;
+
+/** "2026-12-31" (a date input's value) -> the end of that day, local time, as ISO. */
+export const endOfDayIso = (day: string) => new Date(`${day}T23:59:59`).toISOString();
+
+/** ISO -> "2026-12-31" in local time, for a date input. */
+export function dayOf(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 /** "+60 12-345 6789" from "60123456789" (as the Channels page shows numbers). */
 export const prettyNumber = (n: string | null | undefined) => (n ? `+${n.replace(/^(\d{2})(\d{2})(\d{3,4})(\d{4})$/, "$1 $2-$3 $4")}` : "");

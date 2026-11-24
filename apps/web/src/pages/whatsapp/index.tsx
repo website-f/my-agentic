@@ -52,6 +52,8 @@ import {
 } from "@/lib/wa";
 import { agentsQuery } from "@/lib/work";
 
+import { MembersButton } from "./members";
+
 const FULL_H = "h-[calc(100dvh-3.5rem-env(safe-area-inset-top)-4.5rem-env(safe-area-inset-bottom))] md:h-[calc(100dvh-3.5rem-env(safe-area-inset-top))]";
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
@@ -90,6 +92,7 @@ export function WhatsAppPage() {
           <div className="flex items-center gap-2">
             <WhatsappLogoIcon size={20} weight="fill" className="text-[#25d366]" />
             <p className="min-w-0 flex-1 truncate text-[14px] font-semibold">{status.data.me?.pushName || prettyNumber(numberOf(status.data.me?.id ?? ""))}</p>
+            <MembersButton />
           </div>
           <SearchInput value={q} onChange={setQ} placeholder={t("Search chats")} className="basis-0" />
         </div>
@@ -185,7 +188,7 @@ function Avatar({ chat, size = 40 }: { chat: Pick<WaChat, "name" | "picture" | "
   );
 }
 
-const AI_LABEL: Record<AiMode, string> = { off: "AI off", me: "AI: only me", everyone: "AI: everyone" };
+const AI_LABEL: Record<AiMode, string> = { off: "AI off", me: "AI: me and people with access", everyone: "AI: everyone" };
 
 function ChatRow({ chat, active, onOpen }: { chat: WaChat; active: boolean; onOpen: () => void }) {
   const t = useT();
@@ -391,16 +394,16 @@ function RuleDialog({ chat, onClose }: { chat: WaChat; onClose: () => void }) {
       {isLoading ? <Skeleton className="h-32" /> : (
         <div className="grid gap-4">
           <Segmented label={t("Who the AI answers")} value={cur.mode} onChange={setMode} className="w-full [&>button]:flex-1 [&>button]:justify-center"
-            options={[{ value: "off", label: t("Off") }, { value: "me", label: t("Only me") }, { value: "everyone", label: t("Everyone") }]} />
+            options={[{ value: "off", label: t("Off") }, { value: "me", label: t("Only me and people with access") }, { value: "everyone", label: t("Everyone") }]} />
           <p className="text-[12.5px] text-muted">
             {cur.mode === "off" ? t("The AI stays quiet here.")
-              : cur.mode === "me" ? t("The AI answers only you (from your linked number), with everything it may use for you.")
-              : t("The AI also answers other people here.")}
+              : cur.mode === "me" ? t("The AI answers you (from your linked number) with everything it may use for you, and the people you gave access to within their level and limits. Others here are ignored.")
+              : t("The AI also answers anyone else here who mentions the number.")}
           </p>
           {cur.mode === "everyone" ? (
             <p className="flex items-start gap-2 rounded-sm border border-warn/30 bg-warn/8 px-3 py-2 text-[12.5px] text-warn">
               <WarningIcon size={15} className="mt-px shrink-0" />
-              {t("Other people get a limited answer: the AI has no access to your private data, files or tools when it answers them.")}
+              {t("Anyone who mentions the number gets a limited answer: the AI has no access to your private data, files or tools when it answers them. You and people with access still get their usual help.")}
             </p>
           ) : null}
           {cur.mode !== "off" ? (
