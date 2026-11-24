@@ -1520,6 +1520,11 @@ from .deep_research import DEEP_RESEARCH_TOOLS  # noqa: E402
 
 TOOLS.update({t.name: t for t in DEEP_RESEARCH_TOOLS})
 
+# My Agentic: the standard layout of letters and documents, read before drafting.
+from .doc_formats import DOC_FORMAT_TOOLS  # noqa: E402
+
+TOOLS.update({t.name: t for t in DOC_FORMAT_TOOLS})
+
 # P24: what documents the agent's company has (folders, kinds, files; held-back ones counted).
 from .company_tools import COMPANY_TOOLS  # noqa: E402
 

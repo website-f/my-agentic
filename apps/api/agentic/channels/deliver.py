@@ -620,6 +620,7 @@ async def queue_whatsapp(
     kind: str = "reply",
     dedupe: str | None = None,
     reply_to: str = "",
+    mentions: list[str] | None = None,
 ) -> str | None:
     did = await _add(
         db,
@@ -628,7 +629,11 @@ async def queue_whatsapp(
             channel="whatsapp",
             target=f"{ch.id}:{chat_id}",
             kind=kind,
-            payload={"text": text, **({"reply_to": reply_to} if reply_to else {})},
+            payload={
+                "text": text,
+                **({"reply_to": reply_to} if reply_to else {}),
+                **({"mentions": mentions} if mentions else {}),
+            },
             dedupe_key=dedupe,
             created_at=datetime.now(UTC),
         ),
@@ -726,8 +731,11 @@ async def deliver(db: AsyncSession, delivery_id: str) -> str:
             else:
                 cfg = whatsapp.Config.load(channel_token(ch))
                 quote = str(d.payload.get("reply_to") or "")
-                if quote and cfg.provider == "waha":  # My Agentic: a group answer quotes the ask
-                    mid = await whatsapp.waha_send(cfg, chat_id, d.payload.get("text", ""), quote)
+                tags = [str(x) for x in d.payload.get("mentions") or []]
+                if (quote or tags) and cfg.provider == "waha":  # My Agentic: quote, tag people
+                    mid = await whatsapp.waha_send(
+                        cfg, chat_id, d.payload.get("text", ""), quote, tags
+                    )
                 else:
                     mid = await whatsapp.send_text(cfg, chat_id, d.payload.get("text", ""))
                 d.state, d.sent_at = "sent", datetime.now(UTC)

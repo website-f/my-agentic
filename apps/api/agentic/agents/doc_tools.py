@@ -836,8 +836,12 @@ DOC_TOOLS: list[Tool] = [
         "values) or free-form (give body as markdown; write [[What is needed]] where a fact is "
         "missing instead of inventing it). Company details fill in automatically. Returns the "
         "checks to fix. Drafting again with the same title revises it. Use the company's own "
-        "template for this kind of document when list_templates has one; a generic letter only "
-        "when none fits. If the document already exists, revise it (revise_document) instead of "
+        "template for this kind of document when list_templates has one (a person's own letter, "
+        "e.g. a resignation: 'Resignation letter' / 'Surat peletakan jawatan' / 'Personal "
+        "letter', never the company's 'Official letter'); call document_format first for the "
+        "standard layout and follow it exactly. A template's text field holds only the "
+        "paragraphs, never a 'Dear ...' line or a closing. If the document already exists, "
+        "revise it (revise_document) instead of "
         "drafting a second one: never leave a duplicate or a copy marked cancelled.",
         {
             "type": "object",

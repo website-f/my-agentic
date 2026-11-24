@@ -51,4 +51,5 @@ MS_MINE: dict[str, str] = {
         "Saya tidak dapat melampirkan {name} di sini. Ia ada dalam fail anda di aplikasi."
     ),
     "Deep research on the web": "Penyelidikan mendalam di web",
+    "Standard document layout": "Susun atur dokumen standard",
 }

@@ -379,7 +379,7 @@ async def test_owner_in_a_group_gets_the_chat_history_and_the_pdf_it_asked_for(c
         {"id": "false_120363@g.us_ABC", "from_me": False, "sender": "60122223333@c.us", "sender_name": "Boss", "text": "@60111000111 quote please", "at": "2026-11-24T01:01:00+00:00", "media": None},
     ]
 
-    async def fake_messages(cfg, chat_id, limit=50):
+    async def fake_messages(cfg, chat_id, limit=50, media=False):
         assert chat_id == "120363000@g.us"
         return history
 
@@ -520,6 +520,138 @@ def test_web_pdfs_are_read_one_at_a_time(monkeypatch):
     monkeypatch.setattr(extract, "_PDFIUM", Spy())
     tools.pdf_text(b"not a pdf")
     assert held == [1]  # PDFium is only touched under the shared lock
+
+
+def test_at_name_becomes_a_real_whatsapp_tag():
+    people = {"Ali": "60133334444@c.us", "Ali Hassan": "60155556666@c.us", "Siti": "123456789@lid"}
+    text, ids = wa_bot.tag("@Ali Hassan please send it, and @siti check. @60133334444 too", people)
+    assert text == "@60155556666 please send it, and @123456789 check. @60133334444 too"
+    assert ids == ["60155556666@c.us", "123456789@lid", "60133334444@c.us"]
+    assert wa_bot.tag("no tags here", people) == ("no tags here", [])
+
+
+async def test_a_group_ask_sees_the_shared_files_and_can_tag_people(client, monkeypatch):
+    from agentic.documents import service as doc_service
+    from agentic.models import Agent, Branch, DocFile
+
+    ch_id, owner_id = await _wa_setup(client)
+    async with SessionLocal() as db:
+        ws_id = (await db.get(Channel, ch_id)).workspace_id
+        branch = await db.scalar(select(Branch).where(Branch.workspace_id == ws_id))
+        db.add(Agent(workspace_id=ws_id, branch_id=branch.id, name="Chief", role="Assistant", slug="chief", owner_user_id=owner_id, private=True))
+        await db.commit()
+
+    history = [
+        {"id": "m1", "from_me": False, "sender": "60133334444@c.us", "sender_name": "Ali", "text": "this is the quotation", "at": "2026-11-25T01:00:00+00:00",
+         "media": {"mimetype": "text/plain", "filename": "quote.txt", "url": "", "path": "/api/files/default/m1.txt"}},
+        {"id": "false_120363@g.us_ABC", "from_me": False, "sender": "60122223333@c.us", "sender_name": "Boss", "text": "@60111000111 analyze the file and tag Ali", "at": "2026-11-25T01:01:00+00:00", "media": None},
+    ]
+    asked_media: list[bool] = []
+
+    async def fake_messages(cfg, chat_id, limit=50, media=False):
+        asked_media.append(media)
+        return history
+
+    async def fake_download(cfg, ref, max_bytes):
+        assert ref == "/api/files/default/m1.txt"
+        return b"Quotation: 10 chairs RM350 each, total RM3,500."
+
+    read_ids: list[str] = []
+
+    async def fake_process(db, file_id, **kw):
+        read_ids.append(file_id)
+        f = await db.get(DocFile, file_id)
+        f.status, f.text = "ready", "Quotation: 10 chairs RM350 each, total RM3,500."
+        await db.commit()
+        return "ok"
+
+    seen: list[str] = []
+
+    class Reply:
+        content = "The quotation totals RM3,500 for 10 chairs. @Ali please confirm the delivery date."
+        message_id = None
+
+    async def fake_turn(db, agent, session, text):
+        seen.append(text)
+        return Reply()
+
+    async def fake_status(cfg):
+        return {"status": "WORKING", "me": ME}
+
+    async def no_send(db, did):
+        return None
+
+    monkeypatch.setattr(whatsapp, "waha_messages", fake_messages)
+    monkeypatch.setattr(whatsapp, "download_media", fake_download)
+    monkeypatch.setattr(whatsapp, "waha_status", fake_status)
+    monkeypatch.setattr(doc_service, "process_file", fake_process)
+    monkeypatch.setattr(wa_bot.runtime, "chat_turn", fake_turn)
+    monkeypatch.setattr(deliver, "deliver", no_send)
+
+    (msg,) = whatsapp.parse_waha(_group_payload("@60111000111 analyze the file and tag Ali", mention=["60111000111@c.us"]))
+    async with SessionLocal() as db:
+        ch = await db.get(Channel, ch_id)
+        await wa_bot.handle(db, ch, msg)
+
+    (text,) = seen
+    assert True in asked_media  # the files were asked for
+    fid = read_ids[0]
+    assert f"quote.txt (file) from Ali at 2026-11-25T01:00:00+00:00: file {fid}" in text
+    assert "read_file" in text and "People in this chat you can tag" in text and "Ali" in text
+    async with SessionLocal() as db:
+        f = await db.get(DocFile, fid)
+        assert f.folder == "WhatsApp" and f.status == "ready"
+        d = await db.scalar(select(Delivery).where(Delivery.channel == "whatsapp"))
+    assert "@60133334444 please confirm" in d.payload["text"]
+    assert d.payload["mentions"] == ["60133334444@c.us"]  # a real tag for Ali
+    # the same file is saved once, even when asked about again
+    msg.message_id = "again"
+    async with SessionLocal() as db:
+        ch = await db.get(Channel, ch_id)
+        await wa_bot.handle(db, ch, msg)
+    assert len(read_ids) == 1
+
+
+async def test_a_resignation_letter_has_the_standard_personal_layout(client, llm, temporal):
+    from agentic.agents.doc_formats import find
+    from agentic.agents.tools import TOOLS, ToolContext
+    from agentic.documents import service as doc_service
+    from agentic.models import Agent, Document, Workspace
+
+    from .test_agents import new_agent, office
+
+    assert find("resignation") == "resignation_letter" and find("surat letak jawatan") == "surat_peletakan_jawatan"
+    o = await office(client)
+    a = await new_agent(client, o, "Chief", "Management")
+    async with SessionLocal() as db:
+        ws = await db.scalar(select(Workspace))
+        await doc_service.ensure_starters(db, ws.id)
+        agent = await db.get(Agent, a["id"])
+        ctx = ToolContext(db=db, agent=agent, workspace=ws, task=None)
+        guide = await TOOLS["document_format"].handler(ctx, {"kind": "resignation letter"})
+        assert "Yours sincerely" in guide and "NOT the company letterhead" in guide
+        out = await TOOLS["draft_document"].handler(ctx, {
+            "template": "Resignation letter",
+            "title": "Resignation - Danson",
+            "values": {
+                "my_name": "Danson Lee", "my_address": "12 Jalan Ampang, Kuala Lumpur",
+                "recipient_name": "Eleanor Tan", "recipient_title": "HR Manager",
+                "company_name": "Acme Sdn Bhd", "my_position": "Senior Engineer",
+                "last_day": "2026-12-31", "notice_period": "one month",
+            },
+        })
+        assert "Error" not in out[:20], out
+        doc = await db.scalar(select(Document).where(Document.title == "Resignation - Danson"))
+        assert doc.kind == "personal_letter"
+        r = await doc_service.render(db, doc)
+        md = r.filled.markdown
+        pdf, _, _ = await doc_service.export(db, doc, "pdf")
+    assert md.startswith("**Danson Lee**")
+    assert "Dear Eleanor Tan," in md and md.count("Dear ") == 1  # one salutation
+    assert "**RESIGNATION FROM THE POSITION OF SENIOR ENGINEER**" in md
+    assert "31 December 2026" in md and "Yours sincerely," in md and "Our ref" not in md
+    assert "[[" not in md  # nothing missing, the optional parts dropped cleanly
+    assert pdf.startswith(b"%PDF") and b"Page 1 of" not in pdf  # a letter is not page-numbered
 
 
 _ = (BytesParser, policy)

@@ -109,7 +109,7 @@ def fill(
                         missing.append(lab)
                     return f"[[{lab}]]"
                 return ""
-            return val
+            return val.upper() if m.group(2) else val
 
         _set_text(p, PLACEHOLDER.sub(sub, p.text))
     buf = io.BytesIO()

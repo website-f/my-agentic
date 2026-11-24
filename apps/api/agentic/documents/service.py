@@ -38,7 +38,9 @@ from .extract import (
     understand_prompt,
 )
 from .fill import Filled, context, fill, fmt_date
-from .starter import STARTERS, STARTERS_MS
+from .starter import STARTERS, STARTERS_MS, STARTERS_PERSONAL
+
+PERSONAL_KIND = "personal_letter"
 
 log = logging.getLogger("agentic.documents")
 
@@ -283,6 +285,10 @@ async def ensure_starters(db: AsyncSession, workspace_id: str) -> None:
         if malay_company or await folder_lang(db, workspace_id) == "ms":
             todo += STARTERS_MS
             ws.settings = {**(ws.settings or {}), "starters_ms": True}
+    # My Agentic: letters a person writes (a resignation...), once for every workspace.
+    if ws is not None and not (ws.settings or {}).get("starters_personal"):
+        todo += STARTERS_PERSONAL
+        ws.settings = {**(ws.settings or {}), "starters_personal": True}
     if not todo:
         return
     names = set(
@@ -430,10 +436,18 @@ async def export(
     db: AsyncSession, doc: Document, fmt: str, numbered: bool = True
 ) -> tuple[bytes, str, str]:
     r = await render(db, doc)
-    lh = await letterhead(db, doc.branch_id)
+    personal = doc.kind == PERSONAL_KIND
+    # My Agentic: a person's own letter (a resignation) is not on the company letterhead.
+    lh = None if personal else await letterhead(db, doc.branch_id)
     name = _slug(f"{doc.number} {doc.title}" if doc.number else doc.title)
     if fmt == "pdf":
-        data = render_pdf.render(r.filled.markdown, doc.title, lh, numbered)
+        data = render_pdf.render(
+            r.filled.markdown,
+            doc.title,
+            lh,
+            numbered and not personal,
+            letter=personal or doc.kind == "letter",
+        )
     elif fmt == "docx":
         data = r.docx or render_docx.render(r.filled.markdown, doc.title, lh)
     elif fmt == "xlsx":

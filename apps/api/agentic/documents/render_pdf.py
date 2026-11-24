@@ -99,12 +99,16 @@ class Letterhead:
 
 
 class _PDF(FPDF):
-    def __init__(self, lh: Letterhead | None, title: str, numbered: bool = True) -> None:
+    def __init__(
+        self, lh: Letterhead | None, title: str, numbered: bool = True, letter: bool = False
+    ) -> None:
         super().__init__(format="A4", unit="mm")
         self.lh = lh
+        # My Agentic: a letter reads at 11 pt with letter margins; other documents at 10 pt.
+        self.body_size, self.body_h = (11.0, 5.6) if letter else (10.0, 5.0)
         self.numbered = numbered  # off inside a pack, which numbers every page itself
         self.doc_title = title
-        self.set_margins(18, 16, 18)
+        self.set_margins(*((25, 22, 25) if letter else (18, 16, 18)))
         self.set_auto_page_break(True, margin=20)
         fonts = _fonts()
         if fonts:
@@ -211,9 +215,9 @@ class _PDF(FPDF):
                 if SIGN_LINE.match(line):
                     self.ln(12)  # room to sign above the line
                 self.set_x(self.l_margin)
-                self.write_runs(runs(line), 10, 5)
-                self.ln(5)
-            self.ln(2)
+                self.write_runs(runs(line), self.body_size, self.body_h)
+                self.ln(self.body_h)
+            self.ln(2.4 if self.body_size > 10 else 2)
         elif b.kind == "note":
             self.set_text_color(90, 90, 90)
             for line in b.lines:
@@ -227,12 +231,12 @@ class _PDF(FPDF):
             for n, item in enumerate(b.lines, b.start):
                 mark = "•" if b.kind == "bullets" else f"{n}."
                 self.set_x(left + 1.5)
-                self.font(10)
-                self.write(5, self.t(mark))
+                self.font(self.body_size)
+                self.write(self.body_h, self.t(mark))
                 self.set_left_margin(left + 7)
                 self.set_x(left + 7)
-                self.write_runs(runs(item), 10, 5)
-                self.ln(5.6)
+                self.write_runs(runs(item), self.body_size, self.body_h)
+                self.ln(self.body_h + 0.6 + (1.8 if self.body_size > 10 else 0))
                 self.set_left_margin(left)
             self.ln(1.5)
         elif b.kind == "rule":
@@ -298,9 +302,13 @@ class _PDF(FPDF):
 
 
 def render(
-    markdown: str, title: str = "", lh: Letterhead | None = None, numbered: bool = True
+    markdown: str,
+    title: str = "",
+    lh: Letterhead | None = None,
+    numbered: bool = True,
+    letter: bool = False,
 ) -> bytes:
-    pdf = _PDF(lh, title, numbered)
+    pdf = _PDF(lh, title, numbered, letter)
     pdf.add_page()
     for b in parse(markdown):
         pdf.block(b)

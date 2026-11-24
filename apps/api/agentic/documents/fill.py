@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}")
+# My Agentic: {{key|upper}} prints the value in capitals (a letter's subject line).
+PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][\w.]*)\s*(\|\s*upper\s*)?\}\}")
 MISSING = re.compile(r"\[\[([^\]\n]{1,80})\]\]")
 
 # The company kit: what every document about a company reuses. Grouped for the form.
@@ -341,7 +342,7 @@ def fill_text(
             key = m.group(1)
             val = ctx.get(key, "")
             if val.strip():
-                return val
+                return val.upper() if m.group(2) else val
             if key in optional:
                 dropped = True
                 return ""

@@ -466,3 +466,170 @@ Dikeluarkan oleh:
 """,
     },
 ]
+
+
+# My Agentic: letters a PERSON writes (not the company): a resignation, a personal letter. Their
+# own name and address head the page (no company letterhead, no "Our ref"), in the standard
+# layout: sender, date, recipient, salutation, subject, body, closing, signature, name.
+SENDER = [
+    _f("my_name", "Your name", required=True),
+    _f("my_address", "Your address", "longtext"),
+    _f("my_phone", "Your phone"),
+    _f("my_email", "Your email"),
+]
+RECIPIENT = [
+    _f("recipient_name", "Recipient's name", required=True, hint="e.g. Puan Aminah binti Ali"),
+    _f("recipient_title", "Recipient's position", hint="e.g. Human Resources Manager"),
+    _f("company_name", "Company or organisation", required=True),
+    _f("company_address", "Its address", "longtext"),
+]
+
+STARTERS_PERSONAL: list[dict[str, Any]] = [
+    {
+        "name": "Resignation letter",
+        "kind": "personal_letter",
+        "prefix": "LTR",
+        "description": "A formal resignation letter from you to your employer (standard "
+        "layout: your details, date, employer, subject, notice and last day, thanks, handover, "
+        "signature). In English.",
+        "fields": [
+            *SENDER,
+            *RECIPIENT,
+            _f("my_position", "Your position", required=True),
+            _f("last_day", "Last working day", "date", True),
+            _f("notice_period", "Notice period", required=True, hint="e.g. one month"),
+            _f("reason", "Reason (optional)", "longtext", hint="One or two sentences, positive"),
+            _f(
+                "handover",
+                "Handover",
+                "longtext",
+                hint="What you will hand over before you leave",
+            ),
+            _f("thanks_note", "Thanks", "longtext", hint="What you are grateful for"),
+        ],
+        "body": """**{{my_name}}**
+{{my_address}}
+{{my_phone}}
+{{my_email}}
+
+{{doc.date}}
+
+{{recipient_name}}
+{{recipient_title}}
+{{company_name}}
+{{company_address}}
+
+Dear {{recipient_name}},
+
+**RESIGNATION FROM THE POSITION OF {{my_position|upper}}**
+
+Please accept this letter as formal notice of my resignation from my position as {{my_position}} at {{company_name}}, in accordance with my {{notice_period}} notice period. My last working day will be {{last_day}}.
+
+{{reason}}
+
+{{thanks_note}}
+
+{{handover}}
+
+I will do my best to ensure a smooth transition, and please let me know how I can help during my remaining time.
+
+Thank you once again for the opportunity to be part of {{company_name}}.
+
+Yours sincerely,
+
+________________________
+{{my_name}}
+""",
+    },
+    {
+        "name": "Surat peletakan jawatan",
+        "kind": "personal_letter",
+        "prefix": "SRT",
+        "description": "Surat letak jawatan rasmi daripada anda kepada majikan (format surat "
+        "rasmi Melayu: alamat pengirim, tarikh, penerima, Tuan/Puan, perkara, perenggan "
+        "bernombor, Sekian terima kasih, Yang benar). Dalam Bahasa Melayu.",
+        "fields": [
+            *SENDER,
+            *RECIPIENT,
+            _f("my_position", "Jawatan anda", required=True),
+            _f("last_day", "Hari terakhir bekerja", "date", True),
+            _f("notice_period", "Tempoh notis", required=True, hint="cth. sebulan"),
+            _f("reason", "Sebab (pilihan)", "longtext", hint="Satu atau dua ayat, positif"),
+            _f("handover", "Serahan tugas", "longtext", hint="Apa yang akan diserahkan"),
+        ],
+        "body": """**{{my_name}}**
+{{my_address}}
+{{my_phone}}
+{{my_email}}
+
+{{recipient_name}}
+{{recipient_title}}
+{{company_name}}
+{{company_address}}
+
+Tarikh: {{doc.date}}
+
+Tuan/Puan,
+
+**PERLETAKAN JAWATAN SEBAGAI {{my_position|upper}}**
+
+Dengan segala hormatnya saya merujuk kepada perkara di atas.
+
+2. Dengan ini saya ingin memaklumkan peletakan jawatan saya sebagai {{my_position}} di {{company_name}}, mengikut tempoh notis {{notice_period}}. Hari terakhir saya bekerja ialah pada {{last_day}}. {{reason}}
+
+3. Saya akan memastikan serahan tugas berjalan lancar sebelum tarikh tersebut. {{handover}}
+
+4. Saya ingin merakamkan setinggi-tinggi penghargaan atas segala peluang, bimbingan dan kerjasama yang diberikan sepanjang perkhidmatan saya di {{company_name}}.
+
+Sekian, terima kasih.
+
+Yang benar,
+
+________________________
+({{my_name}})
+""",
+    },
+    {
+        "name": "Personal letter",
+        "kind": "personal_letter",
+        "prefix": "LTR",
+        "description": "A formal letter from you as a person (not the company): your details, "
+        "date, recipient, subject, your text, closing and signature. Use for requests, "
+        "complaints, appeals, applications, notices and replies.",
+        "fields": [
+            *SENDER,
+            *RECIPIENT,
+            _f("subject", "Subject", required=True),
+            _f(
+                "body_text",
+                "Letter text",
+                "longtext",
+                True,
+                "Only the paragraphs: no 'Dear ...' line and no closing (the layout has them)",
+            ),
+        ],
+        "body": """**{{my_name}}**
+{{my_address}}
+{{my_phone}}
+{{my_email}}
+
+{{doc.date}}
+
+{{recipient_name}}
+{{recipient_title}}
+{{company_name}}
+{{company_address}}
+
+Dear {{recipient_name}},
+
+**{{subject}}**
+
+{{body_text}}
+
+Yours sincerely,
+
+________________________
+{{my_name}}
+""",
+    },
+]

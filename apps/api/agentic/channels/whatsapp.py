@@ -615,6 +615,8 @@ def message_row(m: dict[str, Any]) -> dict[str, Any]:
     key = (m.get("_data") or {}).get("key") or {}
     media = m.get("media") or {}
     reply = m.get("replyTo") or {}
+    murl = urlparse(str(media.get("url") or ""))
+    mpath = murl.path + (f"?{murl.query}" if murl.query else "")
     return {
         "id": str(m.get("id") or ""),
         "from_me": bool(m.get("fromMe")),
@@ -627,6 +629,8 @@ def message_row(m: dict[str, Any]) -> dict[str, Any]:
             "mimetype": media.get("mimetype") or "",
             "filename": media.get("filename") or "",
             "url": media.get("url") or "",
+            # WAHA's own copy (downloadMedia=true), fetched with the API key: /api/files/...
+            "path": mpath if mpath.startswith("/api/files/") else "",
         }
         if m.get("hasMedia")
         else None,
@@ -656,23 +660,33 @@ async def waha_chats(cfg: Config, limit: int = 50, offset: int = 0) -> list[dict
     return [chat_row(c) for c in rows or [] if isinstance(c, dict)]
 
 
-async def waha_messages(cfg: Config, chat_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    """A chat's newest messages, oldest first (for reading top to bottom)."""
+async def waha_messages(
+    cfg: Config, chat_id: str, limit: int = 50, media: bool = False
+) -> list[dict[str, Any]]:
+    """A chat's newest messages, oldest first (for reading top to bottom). media=True has
+    WAHA download each message's file too (its media.path is then set)."""
     from urllib.parse import quote
 
     rows = await _waha(
         cfg,
         "GET",
         f"/api/{cfg.session}/chats/{quote(chat_id, safe='@.')}/messages"
-        f"?limit={max(1, min(limit, 200))}&downloadMedia=false",
+        f"?limit={max(1, min(limit, 200))}&downloadMedia={'true' if media else 'false'}",
     )
     out = [message_row(m) for m in rows or [] if isinstance(m, dict)]
     out.sort(key=lambda m: m["at"] or "")
     return out
 
 
-async def waha_send(cfg: Config, chat_id: str, text: str, reply_to: str = "") -> str:
-    """Send a text into a chat (a person or a group), quoting a message when given."""
+async def waha_send(
+    cfg: Config,
+    chat_id: str,
+    text: str,
+    reply_to: str = "",
+    mentions: list[str] | None = None,
+) -> str:
+    """Send a text into a chat (a person or a group), quoting a message when given. My
+    Agentic: `mentions` (WhatsApp ids) turns their "@number" in the text into real tags."""
     body: dict[str, Any] = {
         "session": cfg.session,
         "chatId": waha_chat_id(chat_id),
@@ -680,6 +694,8 @@ async def waha_send(cfg: Config, chat_id: str, text: str, reply_to: str = "") ->
     }
     if reply_to:
         body["reply_to"] = reply_to
+    if mentions:
+        body["mentions"] = list(dict.fromkeys(mentions))
     data = await _waha(cfg, "POST", "/api/sendText", body)
     mid = (data or {}).get("id", "")
     return str(mid.get("_serialized", "") if isinstance(mid, dict) else mid)
