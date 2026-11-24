@@ -22,7 +22,7 @@ from ..engine import acting, gateway, media
 from ..i18n import Msg, tr, use_lang
 from ..models import Agent, Binding, Channel, ChannelLink, ChatSession, Membership, User, WaChatRule
 from ..services import prefs
-from . import deliver, receipts, voice, whatsapp
+from . import deliver, receipts, voice, wa_format, whatsapp
 from .bot import link_lang
 from .whatsapp import Inbound
 
@@ -39,14 +39,22 @@ async def _reply(
     My Agentic: `quote` answers a group message as a reply to it."""
     if isinstance(text, Msg):
         text = text.render()
-    did = await deliver.queue_whatsapp(
-        db, ch, chat_id, text, dedupe=f"wa:{ch.id}:{key}", reply_to=quote
-    )
-    if did:
-        try:
-            await deliver.deliver(db, did)
-        except deliver.Retry:
-            await deliver.start([did])
+    # My Agentic: a long answer goes as numbered parts (one message was cut at 4000
+    # characters), the first quoting the ask.
+    for i, part in enumerate(wa_format.parts(text)):
+        did = await deliver.queue_whatsapp(
+            db,
+            ch,
+            chat_id,
+            part,
+            dedupe=f"wa:{ch.id}:{key}" + (f":{i}" if i else ""),
+            reply_to=quote if i == 0 else "",
+        )
+        if did:
+            try:
+                await deliver.deliver(db, did)
+            except deliver.Retry:
+                await deliver.start([did])
 
 
 async def _link(db: AsyncSession, ch: Channel, code: str, msg: Inbound) -> str:
@@ -409,7 +417,7 @@ async def _guest(
         )
     except gateway.GatewayUnavailable:
         return
-    answer = (r.content or "").strip()
+    answer = wa_format.to_whatsapp((r.content or "").strip())
     if answer:
         await _reply(db, ch, where, f"*{name}*: {answer}", key, quote)
 
@@ -535,6 +543,7 @@ async def _handle(db: AsyncSession, ch: Channel, msg: Inbound, link: ChannelLink
         )
     # A voice note's answer quotes what was heard (WhatsApp shows "> " as a quote).
     said = f"> {voice.quote(heard)}\n\n" if heard else ""
+    answer = wa_format.to_whatsapp(answer)  # Markdown as WhatsApp shows it
     await _reply(db, ch, where, f"{said}*{agent.name}*: {answer}", key, quote)
     # My Agentic: the files the agent made (a quotation PDF...) or named arrive as documents.
     await _send_files(db, ch, where, agent, started, answer, quote)

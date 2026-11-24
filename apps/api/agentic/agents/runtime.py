@@ -2132,7 +2132,8 @@ WHATSAPP_FILES_NOTE = (
     "[Channel: WhatsApp. Any file you create in this turn, or name by its id (fl_...), is sent "
     "into this chat automatically as a WhatsApp document right after your reply. So say the "
     "file is attached here (name it); never say you cannot attach or send files in this chat, "
-    "and do not create a file again just to send it: naming its id is enough.]"
+    "and do not create a file again just to send it: naming its id is enough. Write for "
+    "WhatsApp: short paragraphs, *single asterisks* for bold, simple lists, no tables.]"
 )
 
 
