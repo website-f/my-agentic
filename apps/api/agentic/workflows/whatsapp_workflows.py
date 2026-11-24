@@ -59,7 +59,9 @@ class WhatsAppInboundWorkflow:
         await workflow.execute_activity(
             whatsapp_inbound,
             args=[channel_id, msg],
-            start_to_close_timeout=timedelta(minutes=5),
+            # My Agentic: a turn may run deep research (up to 4 minutes) and more tools after
+            # it; a cut-off turn leaves no answer at all, so allow it time.
+            start_to_close_timeout=timedelta(minutes=15),
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
 

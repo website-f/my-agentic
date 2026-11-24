@@ -237,22 +237,29 @@ MAX_PDF_PAGES = 60
 def pdf_text(data: bytes) -> str:
     """The text layer of a PDF, page by page ([page N] markers, as read_file shows). A scan
     with no text layer gives a note instead (OCR is too slow for a web read)."""
-    try:
-        import pypdfium2 as pdfium
+    # My Agentic: PDFium is not thread-safe. Web pages are read several at once (research,
+    # deep_research), each PDF in a worker thread: two at the same time corrupted memory and
+    # crashed the worker ("malloc_consolidate(): unaligned fastbin chunk"). The same lock as
+    # the office's file reading (documents/extract.py) makes every PDFium use one at a time.
+    from ..documents.extract import _PDFIUM
 
-        pdf = pdfium.PdfDocument(data)
-    except Exception:  # noqa: BLE001 - a broken or encrypted file
-        return "(This PDF could not be opened: it may be damaged or password-protected.)"
-    parts = []
-    try:
-        for i in range(min(len(pdf), MAX_PDF_PAGES)):
-            page = pdf[i]
-            text = page.get_textpage().get_text_range().strip()
-            if text:
-                parts.append(f"[page {i + 1}]\n{text}")
-        more = len(pdf) - MAX_PDF_PAGES
-    finally:
-        pdf.close()
+    with _PDFIUM:
+        try:
+            import pypdfium2 as pdfium
+
+            pdf = pdfium.PdfDocument(data)
+        except Exception:  # noqa: BLE001 - a broken or encrypted file
+            return "(This PDF could not be opened: it may be damaged or password-protected.)"
+        parts = []
+        try:
+            for i in range(min(len(pdf), MAX_PDF_PAGES)):
+                page = pdf[i]
+                text = page.get_textpage().get_text_range().strip()
+                if text:
+                    parts.append(f"[page {i + 1}]\n{text}")
+            more = len(pdf) - MAX_PDF_PAGES
+        finally:
+            pdf.close()
     if not parts:
         return (
             "(This PDF has no text layer: it is a scan. Save it with the browser and read it "

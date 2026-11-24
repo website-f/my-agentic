@@ -397,4 +397,42 @@ def render(
         out.append(d)
     if lead:  # a chat whose tail has no user message: the checkpoint goes first on its own
         out.insert(0, {"role": "user", "content": CHECKPOINT + (window.summary or "")})
+    return repair_tool_pairs(out)
+
+
+INTERRUPTED = (
+    "[No result: this tool call was interrupted (the server restarted or it ran out of time). "
+    "Do not assume it worked; run it again if it is still needed.]"
+)
+
+
+def repair_tool_pairs(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """My Agentic: every assistant tool call answered, every tool result asked for. A call cut
+    off mid-way (a crash, a restart, a timeout) left a tool_call with no result, and every AI
+    provider refuses that conversation from then on ("must be followed by tool messages"), so
+    the chat never answered again. Missing results get a short "interrupted" note; results
+    whose call is gone are dropped."""
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < len(msgs):
+        m = msgs[i]
+        if m.get("role") == "tool":
+            i += 1  # a result with no call right before it (its call was cut away)
+            continue
+        out.append(m)
+        i += 1
+        calls = m.get("tool_calls") if m.get("role") == "assistant" else None
+        if not calls:
+            continue
+        wanted = [str(c.get("id") or "") for c in calls if isinstance(c, dict)]
+        got: dict[str, dict[str, Any]] = {}
+        while i < len(msgs) and msgs[i].get("role") == "tool":
+            t = msgs[i]
+            if str(t.get("tool_call_id") or "") in wanted and t["tool_call_id"] not in got:
+                got[t["tool_call_id"]] = t
+            i += 1
+        for cid in wanted:
+            out.append(
+                got.get(cid) or {"role": "tool", "tool_call_id": cid, "content": INTERRUPTED}
+            )
     return out

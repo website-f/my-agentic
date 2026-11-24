@@ -450,4 +450,76 @@ async def test_a_whatsapp_chat_tells_the_agent_its_files_are_attached(client, ll
     assert "WhatsApp document" not in on_web
 
 
+def test_a_cut_off_tool_call_is_repaired_before_the_ai_sees_it():
+    from agentic.agents.context import INTERRUPTED, repair_tool_pairs
+
+    msgs = [
+        {"role": "user", "content": "research bbq"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "deep_research", "arguments": "{}"}}]},
+        # the worker crashed here: no tool result
+        {"role": "user", "content": "kenapa tak reply?"},
+        {"role": "tool", "tool_call_id": "zz", "content": "orphan"},
+    ]
+    out = repair_tool_pairs(msgs)
+    assert [m["role"] for m in out] == ["user", "assistant", "tool", "user"]
+    assert out[2] == {"role": "tool", "tool_call_id": "c1", "content": INTERRUPTED}
+    ok = [msgs[0], msgs[1], {"role": "tool", "tool_call_id": "c1", "content": "done"}]
+    assert repair_tool_pairs(ok) == ok  # a whole conversation is left as it is
+
+
+async def test_a_chat_after_a_crashed_tool_call_still_answers(client, llm, temporal):
+    from datetime import UTC, datetime
+
+    from agentic.agents import runtime
+    from agentic.models import Agent, AgentMessage, ChatSession
+
+    from .test_agents import new_agent, office
+
+    o = await office(client)
+    a = await new_agent(client, o, "Chief", "Management")
+    async with SessionLocal() as db:
+        owner = await db.scalar(select(Membership).where(Membership.role == "owner"))
+        agent = await db.get(Agent, a["id"])
+        s = ChatSession(workspace_id=agent.workspace_id, agent_id=agent.id, user_id=owner.user_id, title="WhatsApp chat 60122223333@c.us")
+        db.add(s)
+        await db.flush()
+        now = datetime.now(UTC)
+        db.add_all([
+            AgentMessage(workspace_id=agent.workspace_id, agent_id=agent.id, session_id=s.id, role="user", content="research bbq", created_at=now),
+            AgentMessage(workspace_id=agent.workspace_id, agent_id=agent.id, session_id=s.id, role="assistant", content="", tool_calls=[{"id": "c1", "type": "function", "function": {"name": "deep_research", "arguments": "{}"}}], created_at=now),
+        ])
+        await db.commit()
+        llm.say("Sorry, the research was cut off. Running it again now.")
+        reply = await runtime.chat_turn(db, agent, s, "kenapa tak reply?")
+    assert "cut off" in reply.content
+    sent = llm.requests[-1]["messages"]
+    roles = [m["role"] for m in sent if m["role"] != "system"]
+    assert roles[-3:] == ["assistant", "tool", "user"]  # the call got its "interrupted" result
+    assert "interrupted" in sent[-2]["content"]
+
+
+def test_web_pdfs_are_read_one_at_a_time(monkeypatch):
+    import threading
+
+    from agentic.agents import tools
+    from agentic.documents import extract
+
+    held = []
+
+    class Spy:
+        def __init__(self):
+            self.lock = threading.Lock()
+
+        def __enter__(self):
+            self.lock.acquire()
+            held.append(1)
+
+        def __exit__(self, *a):
+            self.lock.release()
+
+    monkeypatch.setattr(extract, "_PDFIUM", Spy())
+    tools.pdf_text(b"not a pdf")
+    assert held == [1]  # PDFium is only touched under the shared lock
+
+
 _ = (BytesParser, policy)

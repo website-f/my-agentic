@@ -389,7 +389,7 @@ def _parse_args(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
 # browser; web_fetch may fall back to the browser too.
 SLOW_TOOLS = {
     "research_gather": 150,
-    "deep_research": 300,  # My Agentic: several searches, page reads and two AI calls
+    "deep_research": 240,  # My Agentic: two rounds of searches and reads, three AI calls
     "web_fetch": 90,
     "web_search": 90,
 }

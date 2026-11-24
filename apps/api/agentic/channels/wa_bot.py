@@ -202,6 +202,34 @@ async def _link_of(db: AsyncSession, ch: Channel, msg: Inbound) -> ChannelLink |
     return None
 
 
+SESSION_PREFIX = "WhatsApp chat "  # _handle names each chat's conversation this way
+
+
+async def progress(db: AsyncSession, workspace_id: str, session_id: str, text: str) -> bool:
+    """My Agentic: a short note into the WhatsApp chat a conversation belongs to while a long
+    tool works (deep research takes a minute). False when it is not a WhatsApp chat."""
+    session = await db.get(ChatSession, session_id)
+    if session is None or not (session.title or "").startswith(SESSION_PREFIX):
+        return False
+    chat_id = session.title[len(SESSION_PREFIX) :]
+    agent = await db.get(Agent, session.agent_id)
+    for ch in (
+        await db.scalars(
+            select(Channel).where(
+                Channel.workspace_id == workspace_id,
+                Channel.kind == "whatsapp",
+                Channel.enabled.is_(True),
+            )
+        )
+    ).all():
+        cfg = whatsapp.Config.load(deliver.channel_token(ch))
+        if cfg.provider == "waha":
+            who = f"*{agent.name}*: " if agent else ""
+            await whatsapp.waha_send(cfg, chat_id, f"{who}{text}"[:1000])
+            return True
+    return False
+
+
 async def _rule(db: AsyncSession, ch: Channel, chat_id: str) -> WaChatRule | None:
     return await db.scalar(
         select(WaChatRule).where(WaChatRule.channel_id == ch.id, WaChatRule.chat_id == chat_id)

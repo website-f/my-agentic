@@ -216,14 +216,88 @@ def _evidence(
     return "\n\n".join(parts)[:EVIDENCE_CHARS], sources
 
 
+SUB_PARALLEL = 3  # sub-questions read at once (each reads a few pages at once itself)
+MAX_FOLLOW_UPS = 3
+
+GAPS_SYSTEM = (
+    "You review research notes. Answer with JSON only: "
+    '{"follow_ups": [{"q": "a web search query", "why": "the gap it fills"}]}. List 0 to 3 '
+    "searches that fill the most important gaps for answering the question: facts the notes "
+    "do not cover yet (the date's weather or season if it matters, prices, whether something "
+    "is allowed, opening or booking details, a newer source), or a check on a claim only one "
+    "weak source makes. [] when the notes already answer the question well."
+)
+
+
+async def _round(ctx: ToolContext, subs: list[dict[str, str]]) -> list[dict[str, Any]]:
+    gate = asyncio.Semaphore(SUB_PARALLEL)
+
+    async def one(s: dict[str, str]) -> dict[str, Any]:
+        async with gate:
+            return await _one(ctx, s)
+
+    return list(await asyncio.gather(*(one(s) for s in subs)))
+
+
+async def gaps(
+    ctx: ToolContext, question: str, found: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    """Round two: what the first round left open, as up to three more searches."""
+    notes = []
+    for f in found:
+        bits = [text[:300] for _, _, text in (f.get("passages") or [])[:3]]
+        if not bits:
+            bits = [f"(search result) {t}: {s[:200]}" for t, _, s in (f.get("snippets") or [])[:3]]
+        notes.append(f"## {f['sub']['q']}\n" + ("\n".join(bits) or "(nothing found)"))
+    today, place = _today(ctx)
+    try:
+        raw = await _ask(
+            ctx,
+            GAPS_SYSTEM,
+            f"Today is {today}; the person is in {place}.\nQuestion: {question}\n\n"
+            f"Notes:\n{fence(chr(10).join(notes)[:9000])}",
+            "research.gaps",
+            400,
+        )
+    except Exception:  # noqa: BLE001 - one round is still a report
+        return []
+    asked = {f["sub"]["q"].lower() for f in found}
+    out = []
+    for s in _json(raw).get("follow_ups") or []:
+        q = str((s or {}).get("q") or "").strip()[:200] if isinstance(s, dict) else ""
+        if q and q.lower() not in asked:
+            out.append({"q": q, "why": str(s.get("why") or "follow-up")[:200]})
+    return out[:MAX_FOLLOW_UPS]
+
+
+async def _progress(ctx: ToolContext, text: str) -> None:
+    """On WhatsApp, a quick note that the research has started (it takes a minute)."""
+    if not ctx.session_id or ctx.db is None:
+        return
+    try:
+        from ..channels import wa_bot
+
+        await wa_bot.progress(ctx.db, ctx.workspace.id, ctx.session_id, text)
+    except Exception:  # noqa: BLE001 - a note that could not go is no reason to stop
+        log.info("research progress note not sent", exc_info=True)
+
+
 async def research(ctx: ToolContext, question: str, people_note: str = "") -> str:
     p = await plan(ctx, question)
-    found = await asyncio.gather(*(_one(ctx, s) for s in p["subs"]))
+    await _progress(
+        ctx,
+        "Researching: " + "; ".join(s["q"] for s in p["subs"][:4]) + ". About a minute.",
+    )
+    found = await _round(ctx, p["subs"])
+    follow = await gaps(ctx, question, found)
+    if follow:
+        found += await _round(ctx, follow)
     videos: list[dict[str, str]] = []
     for q in p["videos"]:
         videos.extend(
             v for v in await _videos(ctx, q) if v["url"] not in {x["url"] for x in videos}
         )
+    p["subs"] = [f["sub"] for f in found]
     evidence, sources = _evidence(list(found), videos)
     if not sources:
         return "Error: the web search found nothing usable. Try again with other words."
@@ -246,7 +320,9 @@ async def research(ctx: ToolContext, question: str, people_note: str = "") -> st
     )
 
 
-_SOURCES_HEAD = re.compile(r"\n\s*[#*_ ]*(sources|sumber|references|links)\b[*_ ]*:?[^\n]*(\n|$)", re.I)
+_SOURCES_HEAD = re.compile(
+    r"\n\s*[#*_ ]*(sources|sumber|references|links)\b[*_ ]*:?[^\n]*(\n|$)", re.I
+)
 SITE_NAMES = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram"}
 MAX_VIDEO_LINKS = 9
 
