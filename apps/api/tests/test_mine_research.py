@@ -92,3 +92,43 @@ async def test_deep_research_checks_timing_reads_pages_and_finds_videos(monkeypa
 async def test_deep_research_needs_a_question():
     ctx = ToolContext(db=None, agent=None, workspace=SimpleNamespace(id="ws", timezone="UTC"), task=None)
     assert (await TOOLS["deep_research"].handler(ctx, {})).startswith("Error")
+
+
+async def test_a_search_is_reused_for_a_while(monkeypatch):
+    from agentic.core.config import settings
+
+    calls: list[str] = []
+
+    async def fake_searxng(query, count):
+        calls.append(query)
+        return [websearch.Result("Templer Park BBQ", "https://example.com/templer", "BBQ pits")]
+
+    monkeypatch.setattr(settings, "web_search_cache_seconds", 60)
+    monkeypatch.setattr(websearch, "_backends", lambda: [("SearXNG", fake_searxng)])
+    q = "tempat bbq templer cache test " + str(id(calls))
+    first = await websearch.search(q, 6)
+    again = await websearch.search(q.upper(), 6)  # same words, other case and spacing
+    assert first[0] == "SearXNG" and again[0] == "SearXNG (cached)"
+    assert again[1][0].url == "https://example.com/templer"
+    assert calls == [q]  # the engines were asked once
+
+
+async def test_an_empty_search_is_tried_again_with_a_shorter_query(monkeypatch):
+    seen: list[str] = []
+
+    async def flaky(query, count=6, *, agent_id=None, task_id=None):
+        seen.append(query)
+        if len(seen) == 1:
+            raise websearch.SearchUnavailable("SearXNG: no results")
+        return "SearXNG", [websearch.Result("Weather page", "https://met.example.com/dec", "monsoon")]
+
+    async def fake_gather(question, seeds, max_pages):
+        return {"reads": []}
+
+    monkeypatch.setattr(deep_research, "RETRY_PAUSE", 0)
+    monkeypatch.setattr(websearch, "search", flaky)
+    monkeypatch.setattr(research_tools, "gather", fake_gather)
+    ctx = ToolContext(db=None, agent=None, workspace=SimpleNamespace(id="ws", timezone="UTC"), task=None)
+    got = await deep_research._one(ctx, {"q": "Malaysia weather monsoon forecast 19 December 2026 Selangor rain", "why": "timing"})
+    assert len(seen) == 2 and seen[1] == "Malaysia weather monsoon forecast 19 December 2026"
+    assert got["snippets"][0][1] == "https://met.example.com/dec"  # the retry's results are used

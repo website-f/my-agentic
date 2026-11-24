@@ -139,12 +139,23 @@ async def _one(ctx: ToolContext, sub: dict[str, str]) -> dict[str, Any]:
     """Search one sub-question and read its best pages: passages with their sources."""
     from . import research_tools  # here: research_tools imports tools, which imports this
 
-    try:
-        _, results = await websearch.search(
-            sub["q"], 6, agent_id=ctx.agent.id if ctx.agent is not None else None
-        )
-    except websearch.SearchUnavailable as e:
-        return {"sub": sub, "error": str(e), "passages": [], "sources": []}
+    agent_id = ctx.agent.id if ctx.agent is not None else None
+    results: list[websearch.Result] = []
+    problem = ""
+    # One more try after a short rest, with a shorter query, when the engines gave nothing
+    # (a busy minute: rate limits clear quickly, and long queries match less).
+    for attempt, query in enumerate((sub["q"], " ".join(sub["q"].split()[:7]))):
+        if attempt:
+            await asyncio.sleep(RETRY_PAUSE)
+        try:
+            _, results = await websearch.search(query, 6, agent_id=agent_id)
+        except websearch.SearchUnavailable as e:
+            problem = str(e)
+            results = []
+        if results:
+            break
+    if not results:
+        return {"sub": sub, "error": problem or "no results", "passages": [], "sources": []}
     seeds = [r.url for r in results]
     snippets = [(r.title, r.url, r.snippet) for r in results]
     try:
@@ -216,7 +227,8 @@ def _evidence(
     return "\n\n".join(parts)[:EVIDENCE_CHARS], sources
 
 
-SUB_PARALLEL = 3  # sub-questions read at once (each reads a few pages at once itself)
+SUB_PARALLEL = 2  # sub-questions searched and read at once (gentle on the search engines)
+RETRY_PAUSE = 2.5  # seconds before an empty search is tried once more
 MAX_FOLLOW_UPS = 3
 
 GAPS_SYSTEM = (

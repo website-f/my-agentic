@@ -20,6 +20,7 @@ os.environ["AGENTIC_ENV"] = "dev"
 # The original tests walk a model group in its saved order; tests/test_mine_rotation.py covers
 # My Agentic's default of sharing the work between every cloud model.
 os.environ["AGENTIC_AI_SHARE_BY_DEFAULT"] = "false"
+os.environ["AGENTIC_WEB_SEARCH_CACHE_SECONDS"] = "0"  # each test sees its own fake search
 # P57: test workspaces do not ask for two-step sign-in (test_p57_two_factor.py turns it on).
 os.environ["AGENTIC_NEW_WORKSPACE_REQUIRE_2FA"] = "off"
 # Fake provider hosts used by test_ai_engine.py skip DNS in the SSRF guard.

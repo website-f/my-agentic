@@ -155,6 +155,8 @@ class Settings(BaseSettings):
     brave_search_key: str = ""
     tavily_key: str = ""
     web_search_enabled: bool = True
+    # My Agentic: a search's results are reused this long (Valkey); 0 = off (the tests).
+    web_search_cache_seconds: int = 6 * 3600
 
     # Meeting minutes from a recording: big uploads stream to this folder (a volume shared by
     # api and worker, never Postgres). The original is deleted once its audio is extracted;

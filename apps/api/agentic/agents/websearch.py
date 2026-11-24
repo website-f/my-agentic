@@ -35,6 +35,46 @@ class SearchUnavailable(Exception):
     pass
 
 
+def _cache_key(query: str, count: int) -> str:
+    import hashlib
+
+    raw = f"{' '.join(query.lower().split())}|{count}"
+    return "websearch:" + hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()
+
+
+async def _cached(query: str, count: int) -> tuple[str, list[Result]] | None:
+    if settings.web_search_cache_seconds <= 0:
+        return None
+    try:
+        import json
+
+        from ..core.valkey import valkey
+
+        raw = await valkey().get(_cache_key(query, count))
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return f"{data['backend']} (cached)", [Result(**r) for r in data["results"]]
+    except Exception:  # noqa: BLE001 - no cache: search for real
+        return None
+
+
+async def _remember(query: str, count: int, backend: str, results: list[Result]) -> None:
+    if settings.web_search_cache_seconds <= 0:
+        return
+    try:
+        import json
+
+        from ..core.valkey import valkey
+
+        body = {"backend": backend, "results": [r.__dict__ for r in results]}
+        await valkey().set(
+            _cache_key(query, count), json.dumps(body), ex=settings.web_search_cache_seconds
+        )
+    except Exception:  # noqa: BLE001, S110 - the answer is good without the cache
+        pass
+
+
 async def _get(
     url: str, *, params: dict | None = None, headers: dict | None = None
 ) -> httpx.Response:
@@ -159,11 +199,17 @@ async def search(
     P39: with an agent and a task, the last resort is a search page in the agent's own
     browser (a real browser passes bot checks a script does not)."""
     count = max(1, min(MAX_RESULTS, count))
+    # My Agentic: the same search within a few hours is answered from Valkey, so repeated
+    # research does not get the search engines to rate-limit or CAPTCHA this server.
+    hit = await _cached(query, count)
+    if hit is not None:
+        return hit
     errors = []
     for name, fn in _backends():
         try:
             results = await fn(query, count)  # type: ignore[operator]
             if results:
+                await _remember(query, count, name, results)
                 return name, results
             errors.append(f"{name}: no results")
         except (SearchUnavailable, BlockedURL) as e:

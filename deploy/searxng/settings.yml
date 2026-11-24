@@ -22,6 +22,15 @@ search:
   formats:
     - html
     - json
+  # Seconds a blocked engine rests before it is asked again (SearXNG's defaults are 1 hour
+  # for "too many requests" and a whole day for a CAPTCHA).
+  suspended_times:
+    SearxEngineAccessDenied: 600
+    SearxEngineCaptcha: 1800
+    SearxEngineTooManyRequests: 300
+    cf_SearxEngineCaptcha: 1800
+    cf_SearxEngineAccessDenied: 600
+    recaptcha_SearxEngineCaptcha: 1800
 
 outgoing:
   request_timeout: 6.0
@@ -31,3 +40,15 @@ outgoing:
 
 # The default engines (Google, Bing, DuckDuckGo, Brave, Startpage, Wikipedia, ...) stay on;
 # results merge across them, so one engine blocking us does not empty the results.
+
+# My Agentic (24 Nov 2026): with only Brave, DuckDuckGo, Google CSE and Wikipedia on, a burst
+# of research (60 searches in 10 minutes) got all of them rate-limited or CAPTCHA'd at once,
+# and SearXNG kept them suspended for up to a day: every search came back empty. Bing answered
+# fine from this server, so more engines are on, and a blocked engine rests minutes, not a day.
+engines:
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: startpage
+    disabled: false
