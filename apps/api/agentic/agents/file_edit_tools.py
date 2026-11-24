@@ -224,7 +224,9 @@ FILE_EDIT_TOOLS = (
         "document with other details: another company, recalculated amounts, new percentages "
         "or dates. It keeps the exact format and layout and changes only the texts you list. "
         "Steps: read_file to see the exact texts; calc the new values; then call this with "
-        "every old text -> new text (amounts exactly as printed, e.g. '21,239,660.97'). For "
+        "every old text -> new text (amounts exactly as printed, e.g. '21,239,660.97'; whole "
+        "phrases such as 'Merdeka Network Sdn Bhd' rather than one word, and each spelling "
+        "used, e.g. 'MERDEKA' and 'Merdeka', so spacing stays natural). For "
         "Excel you may also set cells ({'Sheet1!B5': 1234}). Never rebuild such a document "
         "with draft_document. One call per output file; for several files call it for each "
         "(or use work_in_background when there are many).",
