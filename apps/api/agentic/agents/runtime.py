@@ -409,6 +409,8 @@ SLOW_TOOLS = {
     "research_gather": 150,
     "deep_research": 240,
     "copy_file_with_changes": 150,  # My Agentic: a long PDF is searched and redrawn page by page
+    "check_ai_text": 90,  # My Agentic: classifier windows + the AI reviewer
+    "humanize_writing": 300,  # a long paper is edited part by part
     "web_fetch": 90,
     "web_search": 90,
 }

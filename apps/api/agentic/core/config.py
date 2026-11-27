@@ -157,6 +157,8 @@ class Settings(BaseSettings):
     web_search_enabled: bool = True
     # My Agentic: a search's results are reused this long (Valkey); 0 = off (the tests).
     web_search_cache_seconds: int = 6 * 3600
+    # My Agentic: the AI-text classifier (academic/detect.py), baked into the api image.
+    aidetect_dir: str = "/opt/models/aidetect"
 
     # Meeting minutes from a recording: big uploads stream to this folder (a volume shared by
     # api and worker, never Postgres). The original is deleted once its audio is extracted;

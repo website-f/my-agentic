@@ -55,6 +55,8 @@ MS_MINE: dict[str, str] = {
     "Copy a file with changes": "Salin fail dengan perubahan",
     "Remember a file's format": "Ingat format fail",
     "Work on it in the background": "Buat di latar belakang",
+    "Check if a text is AI-written": "Semak sama ada teks ditulis oleh AI",
+    "Edit writing to sound natural": "Sunting tulisan supaya kedengaran semula jadi",
     "{name}, you have reached today's limit for the assistant. Try again tomorrow.": (
         "{name}, anda telah mencapai had hari ini untuk pembantu. Cuba lagi esok."
     ),

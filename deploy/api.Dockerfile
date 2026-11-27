@@ -41,6 +41,27 @@ emb = get(f"{base}/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en
           "53cab20ba8f2eb2f6e2d89ecc18e88ef3222169b61b4419cbc13666744a4574b")
 open(f"{out}/3dspeaker_campplus_sv_zh_en_16k-common_advanced.onnx", "wb").write(emb)
 PY
+
+# My Agentic: the AI-text checker's classifier (agentic/academic/detect.py): TMR, Target Mining
+# RoBERTa (MIT), the int8 ONNX build from onnx-community, ~126 MB, checked by sha256.
+ARG AIDETECT_BASE=https://huggingface.co/onnx-community/tmr-ai-text-detector-ONNX/resolve/main
+RUN <<'PY' python -
+import hashlib, os, urllib.request
+base = os.environ["AIDETECT_BASE"]
+out = "/opt/models/aidetect"
+os.makedirs(out, exist_ok=True)
+for path, name, sha in (
+    ("onnx/model_quantized.onnx", "model_quantized.onnx",
+     "a1ff8a917090467375ceaf47667459e431217d5691df463c57b7194624f3ff79"),
+    ("tokenizer.json", "tokenizer.json",
+     "1f33749d010b4d63908e5c174c341622cb45039dd73a139dcd95bd74cc7e304b"),
+):
+    data = urllib.request.urlopen(f"{base}/{path}", timeout=600).read()
+    got = hashlib.sha256(data).hexdigest()
+    if got != sha:
+        raise SystemExit(f"sha256 mismatch for {path}: {got}")
+    open(f"{out}/{name}", "wb").write(data)
+PY
 RUN chmod -R a+rX /opt/models
 
 # Dependencies first, keyed only on the lockfile, so code edits reuse this layer.

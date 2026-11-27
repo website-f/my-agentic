@@ -63,6 +63,8 @@ OUTSIDE_CONTENT = frozenset(
         "deep_research",
         "read_file",
         "view_image",
+        "check_ai_text",  # My Agentic: they quote the file or text they were given
+        "humanize_writing",
         "tool_call",
         "calendar_agenda",
         "search_library",

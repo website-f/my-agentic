@@ -1362,6 +1362,8 @@ FOLLOWS = {
     # same answer here instead of a side door.
     "research_gather": "web_fetch",
     "deep_research": "web_fetch",  # My Agentic: it reads pages too
+    "check_ai_text": "read_file",  # My Agentic: they read the person's files
+    "humanize_writing": "read_file",
     # P25: document search reads the same office documents as the library.
     "search_documents": "search_library",
 }
@@ -1529,6 +1531,11 @@ TOOLS.update({t.name: t for t in DOC_FORMAT_TOOLS})
 from .file_edit_tools import FILE_EDIT_TOOLS  # noqa: E402
 
 TOOLS.update({t.name: t for t in FILE_EDIT_TOOLS})
+
+# My Agentic: academic and everyday writing: AI-text check, humanizer editing pass.
+from .academic_tools import ACADEMIC_TOOLS  # noqa: E402
+
+TOOLS.update({t.name: t for t in ACADEMIC_TOOLS})
 
 # P24: what documents the agent's company has (folders, kinds, files; held-back ones counted).
 from .company_tools import COMPANY_TOOLS  # noqa: E402
